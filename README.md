@@ -9,7 +9,7 @@ The library processes data with Rust and offers a Python interface.
 
 - [ ] File I/O operations in Rust
 - [x] Compatibility with Python
-- [ ] Hardware acceleration
+- [x] Hardware acceleration
 
 
 ## Organization

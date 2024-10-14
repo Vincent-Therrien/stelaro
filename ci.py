@@ -13,9 +13,9 @@ import pathlib
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 subprocess.check_call(["cargo", "fmt"])
-subprocess.check_call(["cargo", "build"])
-subprocess.check_call(["cargo", "test"])
-subprocess.check_call(["maturin", "develop"])
+subprocess.check_call(["cargo", "build", "--features",  "opencl"])
+subprocess.check_call(["cargo", "test", "--features",  "opencl"])
+subprocess.check_call(["maturin", "develop", "--features",  "opencl"])
 subprocess.check_call(["pytest", "tests"])
 
 directories = ["stelaro", "tests"]
