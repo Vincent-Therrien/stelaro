@@ -1,5 +1,5 @@
 [build-system]
-requires = ["maturin>=0.14,<0.15"]
+requires = ["maturin>=1.7,<2.0"]
 build-backend = "maturin"
 
 [project]
@@ -12,12 +12,17 @@ description = "Genomics toolbox"
 readme = "README.md"
 requires-python = ">=3.10"
 classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: 3",
     "License :: MIT License",
     "Operating System :: OS Independent",
 ]
 dynamic = ["dependencies"]
 keywords = ["genomics", "microbiome"]
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
 
 [tool.setuptools]
 packages = [
