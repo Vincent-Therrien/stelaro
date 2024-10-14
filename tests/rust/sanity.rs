@@ -1,3 +1,1 @@
-mod test_sanity {
-
-}
+mod test_sanity {}

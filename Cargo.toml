@@ -8,8 +8,10 @@ name = "stelaro"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-rayon = "1.5.2"
 pyo3 = "0.22.0"
+ndarray = "0.16.0"
+numpy = "0.22"
+rayon = "1.5.2"
 
 [build-dependencies]
 pyo3-build-config = "0.22.4"
