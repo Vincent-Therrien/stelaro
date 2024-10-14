@@ -37,5 +37,7 @@ share/python-wheels/
 MANIFEST
 
 # Documentation
-docs/_autosummary/*
-docs/_build/
+documentation/_autosummary/*
+documentation/_build/
+documentation/static/
+documentation/_templates/
