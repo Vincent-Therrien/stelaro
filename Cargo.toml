@@ -1,0 +1,15 @@
+[package]
+name = "stelaro"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+thiserror = "1.0.30"
+ndarray-npy = { version = "0.8.1", default-features = false }
+rayon = "1.5.2"
+numpy = "0.18.0"
+ndarray = { version = "0.15.4", features = ["approx", "rayon"] }
+pyo3 = { version = "0.18.2", features = ["extension-module"], optional = true }
+
+[build-dependencies]
+pyo3-build-config = "0.18.2"

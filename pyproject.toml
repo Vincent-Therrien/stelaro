@@ -1,0 +1,33 @@
+[build-system]
+requires = ["maturin>=0.14,<0.15"]
+build-backend = "maturin"
+
+[project]
+name = "stelaro"
+version = "0.1.0"
+authors = [
+  { name="Vincent Therrien", email="therrien.vincent.2@courrier.uqam.ca" },
+]
+description = "Genomics toolbox"
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: MIT License",
+    "Operating System :: OS Independent",
+]
+dynamic = ["dependencies"]
+keywords = ["genomics", "microbiome"]
+
+[tool.setuptools]
+packages = [
+    "stelaro"
+]
+include-package-data = true
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[project.urls]
+"Homepage" = "https://github.com/Vincent-Therrien/stelaro"
+"repository" = "https://github.com/Vincent-Therrien/stelaro"
