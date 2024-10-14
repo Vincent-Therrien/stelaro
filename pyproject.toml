@@ -23,6 +23,7 @@ keywords = ["genomics", "microbiome"]
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
+cargo-extra-args = "--features extension-module"
 
 [tool.setuptools]
 packages = [

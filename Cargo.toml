@@ -4,12 +4,15 @@ version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "stelaro_rs"
-crate-type = ["cdylib"]
+name = "stelaro"
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 rayon = "1.5.2"
 pyo3 = "0.22.0"
 
 [build-dependencies]
-pyo3-build-config = "0.18.2"
+pyo3-build-config = "0.22.4"
+
+[features]
+extension-module = ["pyo3/extension-module"]
