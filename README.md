@@ -2,10 +2,10 @@
 
 Genomics toolbox designed for interpretability and high performances.
 
-The project is at an early stage. More detailed description of the planned features will be added.
+The project is at an early stage. More detailed descriptions of the planned features will be added.
 
 
-# Architecture
+## Architecture
 
 - A Rust-based backend, which provides rapid, multi-threaded operations.
 - A Python frontend, which enables users to call the backend with an intuitive API.
