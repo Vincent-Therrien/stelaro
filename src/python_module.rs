@@ -1,11 +1,50 @@
+use crate::io::sequence;
 use numpy::ndarray::{ArrayD, ArrayViewD};
 use numpy::{IntoPyArray, PyArrayDyn, PyReadonlyArrayDyn};
 use pyo3::prelude::*;
+use pyo3::types::{PyList, PyTuple};
+use std::path::Path;
 
-// TODO: Remove this function after the binding is more developed.
 #[pyfunction]
-fn sanity() -> PyResult<String> {
-    Ok("The Python binding functions as expected.".to_string())
+/// Todo: replace `PyList::new_bound` by `PyList::new` in pyo3 version 0.23.0.
+fn read_fasta<'py>(py: Python<'py>, filename: String) -> PyResult<PyObject> {
+    let path = Path::new(&filename);
+    let result = sequence::read_fasta(path);
+    match result {
+        Ok(value) => {
+            let py_list = PyList::new_bound(
+                py,
+                value
+                    .iter()
+                    .map(|(s1, s2)| PyTuple::new_bound(py, &[s1.as_str(), s2.as_str()])),
+            );
+            return Ok(py_list.to_object(py));
+        }
+        Err(_e) => {
+            panic!("Did not find the file `{}`.", filename);
+        }
+    }
+}
+
+#[pyfunction]
+/// Todo: replace `PyList::new_bound` by `PyList::new` in pyo3 version 0.23.0.
+fn read_fastq<'py>(py: Python<'py>, filename: String) -> PyResult<PyObject> {
+    let path = Path::new(&filename);
+    let result = sequence::read_fastq(path);
+    match result {
+        Ok(value) => {
+            let py_list = PyList::empty_bound(py);
+            for (id, seq, quality) in value {
+                let integers: Vec<i32> = quality.iter().map(|&x| x as i32).collect();
+                let py_tuple = (id, seq, integers).to_object(py);
+                py_list.append(py_tuple)?;
+            }
+            return Ok(py_list.to_object(py));
+        }
+        Err(_e) => {
+            panic!("Did not find the file `{}`.", filename);
+        }
+    }
 }
 
 // TODO: Remove this function after the binding is more developed.
@@ -29,7 +68,8 @@ fn axb<'py>(
 
 #[pymodule]
 fn stelaro(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(sanity, m)?)?;
+    m.add_function(wrap_pyfunction!(read_fasta, m)?)?;
+    m.add_function(wrap_pyfunction!(read_fastq, m)?)?;
     m.add_function(wrap_pyfunction!(axb, m)?)?;
     Ok(())
 }

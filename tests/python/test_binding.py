@@ -10,10 +10,6 @@ import numpy as np
 import stelaro.stelaro as stelaro_rs
 
 
-def test_binding_sanity():
-    assert stelaro_rs.sanity() == "The Python binding functions as expected."
-
-
 def test_numpy_sanity():
     x = 3
     A = np.array([1, 2, 3], dtype=np.float64)
