@@ -1,6 +1,7 @@
 # Test Data Files
 
-This directory contains files intended to test the project.
+This directory contains files intended to test the project. Do not edit them, the results expected
+by tests depends on the content of the files.
 
 List of files:
 
