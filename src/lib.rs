@@ -1,7 +1,15 @@
+#[cfg(feature = "opencl")]
 extern crate ocl;
-mod python_module;
+
+#[cfg(feature = "opencl")]
 use ocl::ProQue;
 
+mod python_module;
+pub mod io {
+    pub mod sequence;
+}
+
+#[cfg(feature = "opencl")]
 pub fn trivial() -> ocl::Result<()> {
     const TEST_KERNEL_SOURCE: &str = include_str!("./kernels/test_kernel.cl");
     let pro_que = ProQue::builder()
