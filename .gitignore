@@ -42,3 +42,6 @@ documentation/_autosummary/*
 documentation/_build/
 documentation/static/
 documentation/_templates/
+
+# Sample data
+data/*
