@@ -27,6 +27,7 @@ def test_read_fasta():
 def test_read_fastq():
     os.chdir(dname)
     result = stelaro_rs.read_fastq(FASTQ)
+    print(result)
     assert len(result) == 3
     assert result[0][1] == "AACCGGTTAACCGGTT", "Unexpected sequence"
     assert result[0][2] == [0, 0, 0, 93, 93, 93, 93, 93, 0, 0, 0, 93, 93, 93, 93, 93]

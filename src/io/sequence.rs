@@ -1,6 +1,7 @@
 //! Sequence file input / output utility functions.
 
 use std::fs::File;
+use std::io::Error;
 use std::io::{self, BufRead, BufReader};
 use std::path::Path;
 
@@ -36,9 +37,9 @@ pub fn read_fasta(path: &Path) -> io::Result<Vec<(String, String)>> {
 }
 
 #[derive(Debug)]
-pub struct FastqQualityError;
+struct FastqQualityError;
 
-/// Convert an ASCII sequence of FASTQ quality score into integer values.
+/// Convert an ASCII sequence of FASTQ quality scores into integer values.
 fn get_fastq_quality(quality: &String) -> Result<Vec<u8>, FastqQualityError> {
     const LOWEST_QUALITY: u8 = '!' as u8;
     const HIGHEST_QUALITY: u8 = '~' as u8;
@@ -54,55 +55,63 @@ fn get_fastq_quality(quality: &String) -> Result<Vec<u8>, FastqQualityError> {
     Ok(scores)
 }
 
-/// Read a FASTQ file and return a vector of (ID, sequence, quality) tuples.
-/// The function supports multi-line sequences.
-pub fn read_fastq(path: &Path) -> io::Result<Vec<(String, String, Vec<u8>)>> {
+/// Process a section of a FASTQ file that contains:
+/// - Identifier
+/// - Sequence
+/// - `+` sign (ignored)
+/// - Quality
+fn process_fastq_section(lines: &Vec<String>) -> Result<(String, String, Vec<u8>), Error> {
     const ID_LINE_BEGINNING: char = '@';
     const LINE_SPLIT_BEGINNING: char = '+';
-    let file = File::open(path)?;
-    let reader = BufReader::new(file);
-    let mut fastq_data = Vec::new();
     let mut current_id = String::new();
     let mut current_sequence = String::new();
     let mut current_quality = String::new();
     let mut checking_quality = false;
-    for line in reader.lines() {
-        let line = line?;
+    for line in lines {
         if line.starts_with(LINE_SPLIT_BEGINNING) && line.len() == 1 {
             checking_quality = true;
         } else if line.starts_with(ID_LINE_BEGINNING) && !checking_quality {
-            if !current_id.is_empty() {
-                match get_fastq_quality(&current_quality) {
-                    Ok(q) => {
-                        fastq_data.push((current_id.clone(), current_sequence.clone(), q));
-                    }
-                    Err(_e) => {
-                        eprintln!("Error in sequence quality: {:?}", current_id);
-                    }
-                }
-                current_sequence.clear();
-                current_quality.clear();
-            }
             current_id = line[1..].to_string(); // Remove the '@' character.
         } else if !checking_quality {
             current_sequence.push_str(&line);
         } else {
             current_quality.push_str(&line);
-            if current_quality.len() >= current_sequence.len() {
-                checking_quality = false;
-            }
         }
     }
-    // Push the last sequence in the file.
-    if !current_id.is_empty() {
-        match get_fastq_quality(&current_quality) {
-            Ok(q) => {
-                fastq_data.push((current_id.clone(), current_sequence.clone(), q));
-            }
-            Err(_e) => {
-                eprintln!("Error in sequence quality: {:?}", current_id);
+    let quality = match get_fastq_quality(&current_quality) {
+        Ok(q) => q,
+        Err(_q) => Vec::new(),
+    };
+    Ok((current_id, current_sequence, quality))
+}
+
+/// Read a FASTQ file and return a vector of (ID, sequence, quality) tuples.
+/// The function supports multi-line sequences.
+pub fn read_fastq(path: &Path) -> io::Result<Vec<(String, String, Vec<u8>)>> {
+    const ID_LINE_BEGINNING: char = '@';
+    let file = File::open(path)?;
+    let reader = BufReader::new(file);
+    let mut lines = reader.lines();
+    let mut fastq_data = Vec::new();
+    let mut current_lines = Vec::new();
+    if let Some(first_line) = lines.next() {
+        let first_line = first_line?;
+        current_lines.push(first_line);
+    }
+    for line in lines {
+        let line = line?;
+        if let Some(first_char) = line.chars().next() {
+            if first_char == ID_LINE_BEGINNING {
+                let tuple = process_fastq_section(&current_lines).unwrap();
+                let (_, ref s, ref q) = tuple;
+                if s.len() <= q.len() {
+                    fastq_data.push(tuple);
+                    current_lines.clear();
+                }
             }
         }
+        current_lines.push(line);
     }
+    fastq_data.push(process_fastq_section(&current_lines).unwrap());
     Ok(fastq_data)
 }

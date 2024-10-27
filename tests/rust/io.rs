@@ -27,8 +27,9 @@ mod io {
         let result = stelaro::io::sequence::read_fastq(path.as_path());
         match result {
             Ok(value) => {
+                let (identifier, first_sequence, first_quality) = &value[0];
+                println!("{}", identifier);
                 assert_eq!(value.len(), 3);
-                let (_, first_sequence, first_quality) = &value[0];
                 println!("S: {}", first_sequence);
                 assert_eq!(first_sequence, "AACCGGTTAACCGGTT");
                 assert_eq!(

@@ -6,7 +6,7 @@
 stelaro
 =======
 
-``stelaro`` is a toolbox for analyzing genomic data.
+``stelaro`` is a toolbox for analyzing genomic data, with a focus on metagenomics and phylogenomics.
 
 .. toctree::
    :maxdepth: 2
@@ -15,9 +15,9 @@ stelaro
    user_guide
    developer_guide
    source-code-documentation
+   literature_review
+   benchmarks
 
-The interaction between Rust and Python is based on
-https://towardsdatascience.com/nine-rules-for-writing-python-extensions-in-rust-d35ea3a4ec29.
 
 
 Indices and tables
