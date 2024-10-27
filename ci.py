@@ -31,3 +31,5 @@ for directory in directories:
         n_style_errors += n
 if n_style_errors > 0:
     raise RuntimeError("Style errors detected in Python files.")
+
+print("Success: all validations passed.")

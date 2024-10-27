@@ -5,36 +5,105 @@ use std::io::Error;
 use std::io::{self, BufRead, BufReader};
 use std::path::Path;
 
-/// Read a FASTA file and return a vector of (ID, sequence) pairs.
-pub fn read_fasta(path: &Path) -> io::Result<Vec<(String, String)>> {
-    const ID_LINE_BEGINNING: char = '>';
-    const COMMENT_LINE_BEGINNING: char = ';';
-    let file = File::open(path)?;
-    let reader = BufReader::new(file);
-    let mut fasta_data = Vec::new();
-    let mut current_id = String::new();
-    let mut current_sequence = String::new();
-    for line in reader.lines() {
-        let line = line?;
-        if line.starts_with(COMMENT_LINE_BEGINNING) {
+const FASTA_ID_LINE_BEGINNING: char = '>';
+const FASTA_COMMENT_LINE_BEGINNING: char = ';';
+const FASTQ_ID_LINE_BEGINNING: char = '@';
+const FASTQ_LINE_SPLIT_BEGINNING: char = '+';
+
+// FASTA
+
+/// Process a vector of lines corresponding to one sequence in a FASTA file.
+fn process_fasta_section(lines: &Vec<String>) -> Result<(String, String), Error> {
+    let mut id = String::new();
+    let mut sequence = String::new();
+    let mut id_passed = false;
+    for line in lines {
+        if line.starts_with(FASTA_COMMENT_LINE_BEGINNING) {
             continue;
         }
-        if line.starts_with(ID_LINE_BEGINNING) {
-            if !current_id.is_empty() {
-                fasta_data.push((current_id.clone(), current_sequence.clone()));
-                current_sequence.clear();
-            }
-            current_id = line[1..].to_string(); // Remove the '>' character.
-        } else {
-            current_sequence.push_str(&line);
+        if line.starts_with(FASTA_ID_LINE_BEGINNING) {
+            id = line[1..].to_string(); // Remove the line beginning character.
+            id_passed = true;
+        } else if id_passed {
+            sequence.push_str(&line);
         }
     }
-    // Push the last sequence in the file.
-    if !current_id.is_empty() {
-        fasta_data.push((current_id, current_sequence));
+    Ok((id, sequence))
+}
+
+/// Read a FASTA file and return a vector of (ID, sequence) pairs.
+pub fn read_fasta(path: &Path) -> io::Result<Vec<(String, String)>> {
+    let file = File::open(path)?;
+    let reader = BufReader::new(file);
+    let mut lines = reader.lines();
+    let mut fasta_data = Vec::new();
+    let mut current_lines = Vec::new();
+    if let Some(first_line) = lines.next() {
+        let first_line = first_line?;
+        current_lines.push(first_line);
+    }
+    for line in lines {
+        let line = line?;
+        if let Some(first_char) = line.chars().next() {
+            if first_char == FASTA_ID_LINE_BEGINNING {
+                fasta_data.push(process_fasta_section(&current_lines).unwrap());
+                current_lines.clear();
+            }
+        }
+        current_lines.push(line);
+    }
+    fasta_data.push(process_fasta_section(&current_lines).unwrap());
+    Ok(fasta_data)
+}
+
+/// Read one FASTA sequence from the reader until `n` sequences are obtained.
+pub fn read_fasta_section(reader: BufReader<File>, n: u32) -> io::Result<Vec<(String, String)>> {
+    let mut lines = reader.lines();
+    let mut current_lines = Vec::new();
+    let mut fasta_data = Vec::new();
+    let mut count: u32 = 0;
+    if let Some(first_line) = lines.next() {
+        let first_line = first_line?;
+        current_lines.push(first_line);
+    }
+    let mut reached_file_end = true;
+    for line in lines {
+        let line = line?;
+        if let Some(first_char) = line.chars().next() {
+            if first_char == FASTA_ID_LINE_BEGINNING {
+                fasta_data.push(process_fasta_section(&current_lines).unwrap());
+                current_lines.clear();
+                count += 1;
+                if count >= n {
+                    reached_file_end = false;
+                    break;
+                }
+            }
+        }
+        current_lines.push(line);
+    }
+    if reached_file_end {
+        fasta_data.push(process_fasta_section(&current_lines).unwrap());
     }
     Ok(fasta_data)
 }
+
+pub fn count_fasta_sequences(path: &Path) -> io::Result<u32> {
+    let file = File::open(path)?;
+    let reader = BufReader::new(file);
+    let mut count: u32 = 0;
+    for line in reader.lines() {
+        let line = line?;
+        if let Some(first_char) = line.chars().next() {
+            if first_char == FASTA_ID_LINE_BEGINNING {
+                count += 1;
+            }
+        }
+    }
+    Ok(count)
+}
+
+// FASTQ
 
 #[derive(Debug)]
 struct FastqQualityError;
@@ -61,16 +130,14 @@ fn get_fastq_quality(quality: &String) -> Result<Vec<u8>, FastqQualityError> {
 /// - `+` sign (ignored)
 /// - Quality
 fn process_fastq_section(lines: &Vec<String>) -> Result<(String, String, Vec<u8>), Error> {
-    const ID_LINE_BEGINNING: char = '@';
-    const LINE_SPLIT_BEGINNING: char = '+';
     let mut current_id = String::new();
     let mut current_sequence = String::new();
     let mut current_quality = String::new();
     let mut checking_quality = false;
     for line in lines {
-        if line.starts_with(LINE_SPLIT_BEGINNING) && line.len() == 1 {
+        if line.starts_with(FASTQ_LINE_SPLIT_BEGINNING) && line.len() == 1 {
             checking_quality = true;
-        } else if line.starts_with(ID_LINE_BEGINNING) && !checking_quality {
+        } else if line.starts_with(FASTQ_ID_LINE_BEGINNING) && !checking_quality {
             current_id = line[1..].to_string(); // Remove the '@' character.
         } else if !checking_quality {
             current_sequence.push_str(&line);
@@ -88,7 +155,6 @@ fn process_fastq_section(lines: &Vec<String>) -> Result<(String, String, Vec<u8>
 /// Read a FASTQ file and return a vector of (ID, sequence, quality) tuples.
 /// The function supports multi-line sequences.
 pub fn read_fastq(path: &Path) -> io::Result<Vec<(String, String, Vec<u8>)>> {
-    const ID_LINE_BEGINNING: char = '@';
     let file = File::open(path)?;
     let reader = BufReader::new(file);
     let mut lines = reader.lines();
@@ -101,7 +167,7 @@ pub fn read_fastq(path: &Path) -> io::Result<Vec<(String, String, Vec<u8>)>> {
     for line in lines {
         let line = line?;
         if let Some(first_char) = line.chars().next() {
-            if first_char == ID_LINE_BEGINNING {
+            if first_char == FASTQ_ID_LINE_BEGINNING {
                 let tuple = process_fastq_section(&current_lines).unwrap();
                 let (_, ref s, ref q) = tuple;
                 if s.len() <= q.len() {
@@ -114,4 +180,59 @@ pub fn read_fastq(path: &Path) -> io::Result<Vec<(String, String, Vec<u8>)>> {
     }
     fastq_data.push(process_fastq_section(&current_lines).unwrap());
     Ok(fastq_data)
+}
+
+/// Read FASTQ sequences from the reader until `n` sequences are read.
+pub fn read_fastq_section(
+    reader: BufReader<File>,
+    n: u32,
+) -> io::Result<Vec<(String, String, Vec<u8>)>> {
+    let mut lines = reader.lines();
+    let mut current_lines = Vec::new();
+    let mut fastq_data = Vec::new();
+    let mut count: u32 = 0;
+    if let Some(first_line) = lines.next() {
+        let first_line = first_line?;
+        current_lines.push(first_line);
+    }
+    let mut reached_file_end = true;
+    for line in lines {
+        let line = line?;
+        if let Some(first_char) = line.chars().next() {
+            if first_char == FASTQ_ID_LINE_BEGINNING {
+                let tuple = process_fastq_section(&current_lines).unwrap();
+                let (_, ref s, ref q) = tuple;
+                if s.len() <= q.len() {
+                    fastq_data.push(tuple);
+                    current_lines.clear();
+                    count += 1;
+                    if count >= n {
+                        reached_file_end = false;
+                        break;
+                    }
+                }
+            }
+        }
+        current_lines.push(line);
+    }
+    if reached_file_end {
+        fastq_data.push(process_fastq_section(&current_lines).unwrap());
+    }
+    Ok(fastq_data)
+}
+
+/// Count the number of sequences in a FASTQ file.
+pub fn count_fastq_sequences(path: &Path) -> io::Result<u32> {
+    let file = File::open(path)?;
+    let reader = BufReader::new(file);
+    let mut count: u32 = 0;
+    for line in reader.lines() {
+        let line = line?;
+        if let Some(first_char) = line.chars().next() {
+            if first_char == FASTQ_LINE_SPLIT_BEGINNING {
+                count += 1;
+            }
+        }
+    }
+    Ok(count)
 }

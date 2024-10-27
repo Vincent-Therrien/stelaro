@@ -30,4 +30,6 @@ def test_read_fastq():
     print(result)
     assert len(result) == 3
     assert result[0][1] == "AACCGGTTAACCGGTT", "Unexpected sequence"
-    assert result[0][2] == [0, 0, 0, 93, 93, 93, 93, 93, 0, 0, 0, 93, 93, 93, 93, 93]
+    assert result[0][2] == [
+        0, 0, 0, 93, 93, 93, 93, 93, 0, 0, 0, 93, 93, 93, 93, 93
+    ]
