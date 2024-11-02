@@ -6,6 +6,11 @@ edition = "2021"
 [lib]
 name = "stelaro"
 crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
+
+[[bin]]
+name = "stelaro"
+path = "src/main.rs"
 
 [dependencies]
 pyo3 = "0.22.5"

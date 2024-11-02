@@ -1,31 +1,59 @@
 # stelaro
 
-Genomics toolbox designed for high performances and interpretability. Based on Rust, compatible
-with Python, and accelerated by multithreading and GPUs.
+Metagenomic toolbox designed for high performances and interpretability. Built with Rust,
+compatible with Python, and accelerated with multithreading and GPUs.
 
-This project is at an early stage. Planned elements are marked with checkboxes ([ ]).
+`stelaro` comprises:
+
+- A **Rust executable** processes metagenomic data through the **command-line**.
+- A **Python package** processes metagenomic data in **Python code**.
+
+*This project is at an early stage. Planned elements are marked with checkboxes.*
 
 
 ## Installation
 
-Install the project in a Python virtual environment with
-[Maturin](https://pypi.org/project/maturin/0.8.2/) by executing one of the following commands:
+
+### Full Installation
+
+You can install `stelaro` **with GPU support**, which accelerates the algorithms. This approach is
+recommended. Your system needs the OpenCL runtime to compile the full project. On Linux, follow this
+[guide](https://github.com/KhronosGroup/OpenCL-Guide/blob/main/chapters/getting_started_linux.md)
+to install the runtime. On Windows, install the OpenCL runtime from the vendor of your GPU. You may
+have to place the file `libOpenCL.so` (Linux) or `OpenCL.lib` (Windows) in the directory of the
+project to compile `stelaro` with GPU support.
+
+Install the full **Python** package with [Maturin](https://pypi.org/project/maturin/0.8.2/) by
+executing:
 
 ```
-maturin develop --features opencl  # CPU and GPU installation.
-maturin develop  # CPU-only installation.
+maturin develop --features opencl
 ```
 
-- [ ] To do: Upload the package to PyPI
-
-Build the project as a Rust library with one of the following commands:
+Build the full **Rust** library and executable by executing:
 
 ```
-cargo build --features opencl  # CPU and GPU installation.
-cargo build  # CPU-only library.
+cargo build --features opencl
 ```
 
-- [ ] To do: Upload the library to crate.io.
+
+### CPU-Only Installation
+
+You can install `stelaro` **without GPU support**. All features will be available, but there will be
+no hardware acceleration. This approach is only recommended if your system does not support OpenCL.
+
+Install the CPU-only  **Python** package with [Maturin](https://pypi.org/project/maturin/0.8.2/) by
+executing:
+
+```
+maturin develop
+```
+
+Build the CPU-only **Rust** library and executable by executing:
+
+```
+cargo build
+```
 
 
 ## Planned features
@@ -35,6 +63,8 @@ cargo build  # CPU-only library.
 - [ ] Process metagenomic data with k-mer and graph-based methods.
 - [ ] Visualize results
 - [ ] Measure performances
+- [ ] Upload the package to PyPI
+- [ ] Upload the library to crate.io.
 
 
 ## Organization
