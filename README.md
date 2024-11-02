@@ -5,8 +5,8 @@ compatible with Python, and accelerated with multithreading and GPUs.
 
 `stelaro` comprises:
 
-- A **Rust executable** processes metagenomic data through the **command-line**.
-- A **Python package** processes metagenomic data in **Python code**.
+- A **Rust executable** that processes metagenomic data through the **command-line**.
+- A **Python package** that processes metagenomic data in **Python code**.
 
 *This project is at an early stage. Planned elements are marked with checkboxes.*
 
