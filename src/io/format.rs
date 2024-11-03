@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 lazy_static! {
-    static ref IUPAC_nt_code_full: HashMap<char, u32> = {
+    static ref IUPAC_nt_code_full: HashMap<char, u8> = {
         let mut m = HashMap::new();
         m.insert('A', 0b1000); // Adenosine
         m.insert('C', 0b0100); // Cytosine
@@ -26,7 +26,7 @@ lazy_static! {
 }
 
 lazy_static! {
-    static ref IUPAC_nt_code_compressed: HashMap<char, u32> = {
+    static ref IUPAC_4_nt_code: HashMap<char, u8> = {
         let mut m = HashMap::new();
         m.insert('A', 0b00); // Adenosine
         m.insert('C', 0b01); // Cytosine

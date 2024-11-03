@@ -29,5 +29,5 @@ stelarilo install --source ncbi --name taxonomy --dst data
 ```
 
 If you execute the previous command again, the program will notice that the taxonomy is already
-installed and will not download it again. To download the taxonomy regardless, you can add the
-`--force` option.
+installed and will not download it another time. To download the taxonomy regardless, you can add
+the `--force` option.
