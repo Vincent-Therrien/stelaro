@@ -3,10 +3,10 @@
 Metagenomic toolbox designed for high performances and interpretability. Built with Rust,
 compatible with Python, and accelerated with multithreading and GPUs.
 
-`stelaro` comprises:
+You can use the project as:
 
-- A **Rust executable** that processes metagenomic data through the **command-line**.
-- A **Python package** that processes metagenomic data in **Python code**.
+- An **executable** that processes metagenomic data through the **command-line**.
+- A Python or Rust **library** that processes metagenomic data in **code**.
 
 *This project is at an early stage. Planned elements are marked with checkboxes.*
 
@@ -17,11 +17,11 @@ compatible with Python, and accelerated with multithreading and GPUs.
 ### Full Installation
 
 You can install `stelaro` **with GPU support**, which accelerates the algorithms. This approach is
-recommended. Your system needs the OpenCL runtime to compile the full project. On Linux, follow this
+recommended. Your system needs the OpenCL runtime to build the full project. On Linux, follow this
 [guide](https://github.com/KhronosGroup/OpenCL-Guide/blob/main/chapters/getting_started_linux.md)
-to install the runtime. On Windows, install the OpenCL runtime from the vendor of your GPU. You may
-have to place the file `libOpenCL.so` (Linux) or `OpenCL.lib` (Windows) in the directory of the
-project to compile `stelaro` with GPU support.
+to install the runtime. On Windows, install the OpenCL runtime from the website of the vendor of
+your GPU. After installing the runtime, you may have to place the file `libOpenCL.so` (Linux) or
+`OpenCL.lib` (Windows) in the directory of the project to build `stelaro` with GPU support.
 
 Install the full **Python** package with [Maturin](https://pypi.org/project/maturin/0.8.2/) by
 executing:

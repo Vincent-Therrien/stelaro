@@ -5,6 +5,7 @@ Cargo.lock
 **/*.rs.bk
 *.pdb
 OpenCL.lib
+stelarilo*
 
 # Python
 __pycache__/
