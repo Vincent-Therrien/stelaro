@@ -55,6 +55,10 @@ pub fn download_taxonomy(path: &Path, force: bool) -> Result<(), Error> {
             .join(format!("{}{}", filename, CHECKSUM_SUFFIX));
         if force {
             let _ = download::https(&url, &local_path);
+            let decompressed_name = local_path.with_extension("");
+            if !Path::new(&decompressed_name).exists() {
+                let _ = download::decompress_gz(&local_path, &decompressed_name);
+            }
             let _ = download::https(&checksum_url, &local_checksum_path);
         } else {
             if is_already_downloaded(&local_checksum_path, checksum_url.to_string()) {
@@ -62,6 +66,10 @@ pub fn download_taxonomy(path: &Path, force: bool) -> Result<(), Error> {
             } else {
                 let _ = download::https(&url, &local_path);
                 let _ = download::https(&checksum_url, &local_checksum_path);
+            }
+            let decompressed_name = local_path.with_extension("");
+            if !Path::new(&decompressed_name).exists() {
+                let _ = download::decompress_gz(&local_path, &decompressed_name);
             }
         }
     }
