@@ -8,6 +8,8 @@ You can use the project as:
 - An **executable** that processes metagenomic data through the **command-line**.
 - A Python or Rust **library** that processes metagenomic data in **code**.
 
+Check the [demonstrations](demonstrations/README.md) out for usage examples.
+
 *This project is at an early stage. Planned elements are marked with checkboxes.*
 
 
@@ -69,8 +71,8 @@ cargo build
 
 ## Organization
 
-- `demonstrations`: Usage examples with Jupyter notebooks.
-- `documentation`: Documentation for Rust and Python. Written with Sphinx.
+- `demonstrations`: Usage examples.
+- `documentation`: Documentation for Rust and Python.
 - `src`: **Rust** source code and **OpenCL** kernels.
 - `stelaro`: **Python** source code.
 - `test`: Test cases for Rust and Python.
