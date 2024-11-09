@@ -5,3 +5,5 @@
     - File creation date: October 2024
     - License: MIT
 """
+
+__all__ = ["data", ]

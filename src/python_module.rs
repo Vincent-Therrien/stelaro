@@ -68,9 +68,9 @@ fn axb<'py>(
 }
 
 #[pyfunction]
-fn download(source: String, name: String, dst: String, force: bool) -> PyResult<()> {
+fn install(origin: String, name: String, dst: String, force: bool) -> PyResult<()> {
     let path = Path::new(&dst);
-    match data::install(source, name, path, force) {
+    match data::install(origin, name, path, force) {
         Ok(_) => Ok(()),
         Err(error) => panic!("Installation failed: {}", error),
     }
@@ -80,7 +80,7 @@ fn download(source: String, name: String, dst: String, force: bool) -> PyResult<
 fn stelaro(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(read_fasta, m)?)?;
     m.add_function(wrap_pyfunction!(read_fastq, m)?)?;
-    m.add_function(wrap_pyfunction!(download, m)?)?;
+    m.add_function(wrap_pyfunction!(install, m)?)?;
     m.add_function(wrap_pyfunction!(axb, m)?)?;
     Ok(())
 }

@@ -29,10 +29,15 @@ lazy_static! {
     static ref IUPAC_4_nt_code: HashMap<char, u8> = {
         let mut m = HashMap::new();
         m.insert('A', 0b00); // Adenosine
+        m.insert('a', 0b00); // Adenosine
         m.insert('C', 0b01); // Cytosine
+        m.insert('c', 0b01); // Cytosine
         m.insert('G', 0b10); // Guanine
+        m.insert('g', 0b10); // Guanine
         m.insert('T', 0b11); // Thymine
+        m.insert('t', 0b11); // Thymine
         m.insert('U', 0b11); // Uracil
+        m.insert('u', 0b11); // Uracil
         m
     };
 }

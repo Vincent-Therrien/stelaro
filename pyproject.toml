@@ -19,7 +19,7 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dynamic = ["dependencies"]
-keywords = ["genomics", "microbiome"]
+keywords = ["metagenomics", "bioinformatics", "genomics", "microbiome"]
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
@@ -27,7 +27,8 @@ cargo-extra-args = "--features extension-module"
 
 [tool.setuptools]
 packages = [
-    "stelaro"
+    "stelaro",
+    "stelaro.data",
 ]
 include-package-data = true
 
