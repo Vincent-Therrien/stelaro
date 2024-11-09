@@ -132,8 +132,8 @@ pub fn download_genome_summaries(path: &Path, force: bool) -> Result<(), Error> 
 
 pub fn sample_genomes(
     src: &Path,
-    sampling: String,
     dst: &Path,
+    sampling: String,
     fraction: f32,
 ) -> Result<(), Error> {
     const ID_COLUMN: usize = 0;

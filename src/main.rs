@@ -19,15 +19,15 @@ enum Commands {
         #[arg(short, long, required = true)]
         origin: Option<String>,
 
-        /// Name of the dataset to install. Supported names:
-        /// taxonomy (~32 GB), genome_summaries (~175 MB)
-        #[arg(short, long, required = true)]
-        name: Option<String>,
-
         /// Directory in which to save the data. A subdirectory is automatically create to store
         /// the data downloaded by this command.
         #[arg(short, long, required = true)]
         dst: Option<String>,
+
+        /// Name of the dataset to install. Supported names:
+        /// taxonomy (~32 GB), genome_summaries (~175 MB)
+        #[arg(short, long, required = true)]
+        name: Option<String>,
 
         /// Force installation even if the data are already installed.
         #[arg(short, long)]
@@ -104,21 +104,22 @@ fn main() {
                 Some(s) => s.as_str(),
                 None => panic!("No input directory provided."),
             };
-            let src_path = Path::new(input);
-            let sampling: &str = match sampling {
-                Some(s) => s.as_str(),
-                None => "micro",
-            };
+            let input_path = Path::new(input);
             let dst: &str = match dst {
                 Some(d) => d.as_str(),
                 None => panic!("No output file provided."),
             };
             let dst_path = Path::new(dst);
+            let sampling: &str = match sampling {
+                Some(s) => s.as_str(),
+                None => "micro",
+            };
             let fraction: f32 = match fraction {
                 Some(f) => *f,
                 None => 1.0,
             };
-            match data::sample_genomes(origin, src_path, sampling.to_string(), dst_path, fraction) {
+            match data::sample_genomes(origin, input_path, dst_path, sampling.to_string(), fraction)
+            {
                 Ok(_) => (),
                 Err(error) => panic!("Genome sampling failed: {}", error),
             }

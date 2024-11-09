@@ -63,4 +63,4 @@ stelarilo.exe sample-genomes \
 The argument `fraction` is the approximate amount of genomes sampled from the genome summaries.
 Given that the NCBI contains 407929 reference genomes as of November 2024, you may want to sample
 a subset of genomes to create a more manageable genome database during tests. Using a value of
-`0.01` randomly samples around 407 genomes.
+`0.01` randomly samples around 4080 genomes.

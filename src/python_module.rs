@@ -76,11 +76,28 @@ fn install(origin: String, name: String, dst: String, force: bool) -> PyResult<(
     }
 }
 
+#[pyfunction]
+fn sample_genomes(
+    origin: String,
+    src: String,
+    dst: String,
+    sampling: String,
+    fraction: f32,
+) -> PyResult<()> {
+    let input = Path::new(&src);
+    let output = Path::new(&dst);
+    match data::sample_genomes(origin, input, output, sampling, fraction) {
+        Ok(_) => Ok(()),
+        Err(error) => panic!("Sampling failed: {}", error),
+    }
+}
+
 #[pymodule]
 fn stelaro(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(read_fasta, m)?)?;
     m.add_function(wrap_pyfunction!(read_fastq, m)?)?;
     m.add_function(wrap_pyfunction!(install, m)?)?;
+    m.add_function(wrap_pyfunction!(sample_genomes, m)?)?;
     m.add_function(wrap_pyfunction!(axb, m)?)?;
     Ok(())
 }

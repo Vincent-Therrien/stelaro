@@ -16,23 +16,19 @@ def install_summaries(path: str, force: bool = False) -> None:
     Args:
         path: Directory in which to install data.
     """
-    stelaro_rust.download("ncbi", "genome_summaries", path, force)
+    stelaro_rust.install("ncbi", "genome_summaries", path, force)
 
 
-def assembly_summaries(path: str) -> None:
+def summarize_assemblies(path: str) -> None:
     """Visualize reference genome counts.
 
     Args:
         path: Directory in which the NCBI dataset is installed.
     """
     files = os.listdir(path)
-    if "ncbi_genome_summaries" not in files:
-        print(f"Error: NCBI genome summaries are not installed at `{path}`.")
-        print("Execute `ncbi.install_summaries(path)` to install them.")
-    files = os.listdir(path + "/ncbi_genome_summaries")
     total = 0
     for filename in files:
-        name = path + "/ncbi_genome_summaries/" + filename
+        name = path + filename
         with open(name, "r", encoding='utf-8') as file:
             n_lines = sum(1 for _ in file)
         n_lines -= 2  # Comment lines at the beginning of the file.
@@ -40,3 +36,20 @@ def assembly_summaries(path: str) -> None:
         print(f"{filename[:-4]}: {n_lines:_} genomes".replace("_", " "))
     print()
     print(f"Total: {total:_}".replace("_", " "))
+
+
+def sample_genomes(
+        src: str,
+        dst: str,
+        sampling: str | list = "micro",
+        fraction: float = 1.0
+    ):
+    """Sample genomes from assembly summaries.
+
+    Args:
+        src: Location of the assembly summaries.
+        dst: Name of the file in which to save the index.
+        sampling: Type of sampling. `full` or `micro`.
+        fraction: Proportion of genomes to sample from the original dataset.
+    """
+    stelaro_rust.sample_genomes("ncbi", src,  dst, sampling, fraction)

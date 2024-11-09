@@ -20,12 +20,12 @@ pub fn install(origin: String, name: String, dst: &Path, force: bool) -> Result<
 pub fn sample_genomes(
     origin: String,
     src: &Path,
-    sampling: String,
     dst: &Path,
+    sampling: String,
     fraction: f32,
 ) -> Result<(), Error> {
     let _ = match origin.as_str() {
-        "ncbi" => match ncbi::sample_genomes(src, sampling, dst, fraction) {
+        "ncbi" => match ncbi::sample_genomes(src, dst, sampling, fraction) {
             Ok(_) => (),
             Err(err) => panic!("Error: {err}"),
         },
