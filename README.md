@@ -6,7 +6,7 @@ compatible with Python, and accelerated with multithreading and GPUs.
 You can use the project as:
 
 - An **executable** that processes metagenomic data through the **command-line**.
-- A Python or Rust **library** that processes metagenomic data in **code**.
+- A **library** that processes metagenomic data in Python or Rust **code**.
 
 Check the [demonstrations](demonstrations/README.md) out for usage examples.
 
