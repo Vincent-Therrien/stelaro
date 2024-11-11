@@ -92,12 +92,23 @@ fn sample_genomes(
     }
 }
 
+#[pyfunction]
+fn install_genomes(input: String, dst: String) -> PyResult<()> {
+    let input = Path::new(&input);
+    let dst = Path::new(&dst);
+    match data::install_genomes(input, dst, true) {
+        Ok(_) => Ok(()),
+        Err(error) => panic!("Genome installation failed: {}", error),
+    }
+}
+
 #[pymodule]
 fn stelaro(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(read_fasta, m)?)?;
     m.add_function(wrap_pyfunction!(read_fastq, m)?)?;
     m.add_function(wrap_pyfunction!(install, m)?)?;
     m.add_function(wrap_pyfunction!(sample_genomes, m)?)?;
+    m.add_function(wrap_pyfunction!(install_genomes, m)?)?;
     m.add_function(wrap_pyfunction!(axb, m)?)?;
     Ok(())
 }

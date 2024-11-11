@@ -43,7 +43,7 @@ def sample_genomes(
         dst: str,
         sampling: str | list = "micro",
         fraction: float = 1.0
-    ):
+        ):
     """Sample genomes from assembly summaries.
 
     Args:
@@ -53,3 +53,16 @@ def sample_genomes(
         fraction: Proportion of genomes to sample from the original dataset.
     """
     stelaro_rust.sample_genomes("ncbi", src,  dst, sampling, fraction)
+
+
+def install_genomes(
+        src: str,
+        dst: str
+        ):
+    """Install genomes listed in a file.
+
+    Args:
+        src: Index file containing genomes.
+        dst: Directory in which to install the genomes.
+    """
+    stelaro_rust.install_genomes(src,  dst)

@@ -1,6 +1,12 @@
+use std::fs::{remove_file, File};
 /// Interface functions for the `data` module.
 use std::io::Error;
+use std::io::{BufRead, BufReader};
 use std::path::Path;
+
+use log::info;
+
+use crate::utils::progress;
 
 mod download;
 mod ncbi;
@@ -31,5 +37,38 @@ pub fn sample_genomes(
         },
         _ => panic!("Unsupported origin `{}`.", origin),
     };
+    Ok(())
+}
+
+pub fn install_genomes(file: &Path, dst: &Path, force: bool) -> Result<(), Error> {
+    const ID_COLUMN: usize = 0;
+    const URL_COLUMN: usize = 1;
+    // Count lines.
+    let f = File::open(file)?;
+    let reader = BufReader::new(f);
+    let line_count = reader.lines().count() - 1;
+    // Read the file
+    let file = File::open(file)?;
+    let reader = BufReader::new(file);
+    let mut lines = reader.lines();
+    lines.next(); // Skip the header.
+    let pb = progress::new_bar(line_count as u64);
+    for (i, line) in lines.enumerate() {
+        let line = line?;
+        let elements = line.split("\t").collect::<Vec<&str>>();
+        let url = elements[URL_COLUMN];
+        let id = elements[ID_COLUMN];
+        let download_path = dst.join(format!("{}{}", id, "_tmp"));
+        let install_path = dst.join(id);
+        if force || !install_path.exists() {
+            let _ = match download::https(url, &download_path, false) {
+                Ok(_) => (),
+                Err(_) => info!("Failed to download {}.", download_path.display()),
+            };
+            let _ = download::decompress_gz(&download_path, &install_path, false);
+            let _ = remove_file(download_path);
+        }
+        pb.set_position(i as u64);
+    }
     Ok(())
 }

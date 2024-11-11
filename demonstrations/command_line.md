@@ -53,9 +53,9 @@ genome (e.g. `bacteria`, `archaea`, `viral`, etc.).
 
 ```
 mkdir data/sample
-stelarilo.exe sample-genomes \
+stelarilo sample-genomes \
     --origin ncbi \
-    --input data\ncbi_genome_summaries \
+    --input data/ncbi_genome_summaries \
     --dst data/sample/index.tsv \
     --fraction 0.01
 ```
@@ -64,3 +64,14 @@ The argument `fraction` is the approximate amount of genomes sampled from the ge
 Given that the NCBI contains 407929 reference genomes as of November 2024, you may want to sample
 a subset of genomes to create a more manageable genome database during tests. Using a value of
 `0.01` randomly samples around 4080 genomes.
+
+
+## Install Genomes
+
+Install genomes sampled with the command presented above:
+
+```
+stelarilo install-genomes \
+    --input data/sample/index.tsv \
+    --dst data/sample
+```

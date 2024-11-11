@@ -11,6 +11,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 
 use crate::data::download;
+use crate::utils::progress;
 
 const SERVER_ROOT: &str = "https://ftp.ncbi.nih.gov/";
 const ACCESSION_2_TAXID_PATH: &str = "pub/taxonomy/accession2taxid/";
@@ -29,6 +30,7 @@ const REFERENCE_GENOME_LIST: &'static [&'static str] = &[
 const MICRO_REFERENCE_GENOME_LIST: &'static [&'static str] =
     &["archaea", "bacteria", "fungi", "protozoa", "viral"];
 const CHECKSUM_SUFFIX: &str = ".md5";
+const FNA_FILE_ENDING: &str = "_genomic.fna.gz";
 
 lazy_static! {
     static ref NUCL_TAXID_URLS: HashMap<String, String> = {
@@ -52,7 +54,7 @@ fn is_already_downloaded(local_checksum: &Path, remote_checksum: String) -> bool
     };
     let tmp_filename = format!("{}{}", local_checksum.display(), ".tmp");
     let path = Path::new(&tmp_filename);
-    let _ = download::https(&remote_checksum, path);
+    let _ = download::https(&remote_checksum, path, true);
     let remote = fs::read_to_string(path).unwrap();
     let _ = fs::remove_file(path);
     local == remote
@@ -61,7 +63,7 @@ fn is_already_downloaded(local_checksum: &Path, remote_checksum: String) -> bool
 fn decompress_archive(local_path: &Path) {
     let decompressed_name = local_path.with_extension("");
     if !Path::new(&decompressed_name).exists() {
-        let _ = download::decompress_gz(&local_path, &decompressed_name);
+        let _ = download::decompress_gz(&local_path, &decompressed_name, false);
     } else {
         info!(
             "The file `{}` is already decompressed.",
@@ -85,14 +87,14 @@ pub fn download_taxonomy(path: &Path, force: bool) -> Result<(), Error> {
         let local_path = path.join(filename);
         let local_checksum_path = path.join(format!("{}{}", filename, CHECKSUM_SUFFIX));
         if force {
-            let _ = download::https(&url, &local_path);
+            let _ = download::https(&url, &local_path, true);
             decompress_archive(&local_path);
         } else {
             if is_already_downloaded(&local_checksum_path, checksum_url.to_string()) {
                 info!("The file `{}` is already installed.", filename);
             } else {
-                let _ = download::https(&url, &local_path);
-                let _ = download::https(&checksum_url, &local_checksum_path);
+                let _ = download::https(&url, &local_path, true);
+                let _ = download::https(&checksum_url, &local_checksum_path, true);
             }
             decompress_archive(&local_path);
         }
@@ -123,7 +125,7 @@ pub fn download_genome_summaries(path: &Path, force: bool) -> Result<(), Error> 
                 "{}{}{}/{}",
                 SERVER_ROOT, REFERENCE_GENOME_PATH, genome_summary, FILENAME
             );
-            let _ = download::https(&url, &local_path);
+            let _ = download::https(&url, &local_path, true);
         }
     }
     info!("Genome summaries are installed at `{}`.", path.display());
@@ -152,6 +154,7 @@ pub fn sample_genomes(
     let mut count: u32 = 0;
     let mut rng = rand::thread_rng();
     let _ = file.write(format!("ID\tURL\tcategory\n").as_bytes());
+    let pb = progress::new_bar(categories.len() as u64);
     for category in categories {
         let src_path = src.join(format!("{}.txt", category));
         let input = match File::open(src_path.clone()) {
@@ -160,22 +163,21 @@ pub fn sample_genomes(
         };
         let mut lines = BufReader::new(input).lines();
         lines.next(); // Skip the first comment line.
-        lines.next(); // SKip the header.
+        lines.next(); // Skip the header.
         for line in lines {
             if rng.gen::<f32>() > fraction {
                 continue;
             }
             let line = line?;
             let elements = line.split("\t").collect::<Vec<&str>>();
-            let _ = file.write(
-                format!(
-                    "{}\t{}\t{}\n",
-                    elements[ID_COLUMN], elements[URL_COLUMN], category
-                )
-                .as_bytes(),
-            );
+            let id = format!("{}{}", elements[ID_COLUMN], ".fna");
+            let root_url = elements[URL_COLUMN].to_string();
+            let fna_name = format!("{}{}", root_url.split("/").last().unwrap(), FNA_FILE_ENDING);
+            let fna_url = format!("{}/{}", elements[URL_COLUMN], fna_name);
+            let _ = file.write(format!("{}\t{}\t{}\n", id, fna_url, category).as_bytes());
             count += 1;
         }
+        pb.inc(1);
     }
     info!("Wrote {} lines.", count);
     Ok(())

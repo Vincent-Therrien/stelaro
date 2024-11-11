@@ -19,8 +19,7 @@ enum Commands {
         #[arg(short, long, required = true)]
         origin: Option<String>,
 
-        /// Directory in which to save the data. A subdirectory is automatically create to store
-        /// the data downloaded by this command.
+        /// Directory in which to save the data.
         #[arg(short, long, required = true)]
         dst: Option<String>,
 
@@ -58,6 +57,21 @@ enum Commands {
         /// Fraction of elements to randomly sample. Default: 1.0.
         #[arg(short, long, required = false)]
         fraction: Option<f32>,
+    },
+
+    /// Install genomes listed in a file.
+    InstallGenomes {
+        /// Name of the file that contains the URLs of the genomes.
+        #[arg(short, long, required = true)]
+        input: Option<String>,
+
+        /// Directory in which to save the data.
+        #[arg(short, long, required = true)]
+        dst: Option<String>,
+
+        /// Force installation even if the data are already installed.
+        #[arg(short, long)]
+        force: bool,
     },
 }
 
@@ -122,6 +136,22 @@ fn main() {
             {
                 Ok(_) => (),
                 Err(error) => panic!("Genome sampling failed: {}", error),
+            }
+        }
+        Some(Commands::InstallGenomes { input, dst, force }) => {
+            let input: &str = match input {
+                Some(i) => i.as_str(),
+                None => panic!("No input directory provided."),
+            };
+            let input = Path::new(input);
+            let dst: &str = match dst {
+                Some(d) => d.as_str(),
+                None => panic!("No output file provided."),
+            };
+            let dst = Path::new(dst);
+            match data::install_genomes(input, dst, *force) {
+                Ok(_) => (),
+                Err(error) => panic!("Genome installation failed: {}", error),
             }
         }
         None => {}
