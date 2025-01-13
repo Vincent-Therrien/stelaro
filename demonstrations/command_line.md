@@ -75,3 +75,5 @@ stelarilo install-genomes \
     --input data/sample/index.tsv \
     --dst data/sample
 ```
+
+The files listed in `data/sample/index.tsv` should be be installed in the `data/sample` directory.

@@ -73,6 +73,37 @@ enum Commands {
         #[arg(short, long)]
         force: bool,
     },
+
+    /// Create a simulated metagenomic sample dataset.
+    SyntheticMetagenome {
+        /// Name of the file that contains the URLs of the genomes.
+        #[arg(short, long, required = true)]
+        src: Option<String>,
+
+        /// Name of the directory that contains the installed genomes.
+        #[arg(short, long, required = true)]
+        genomes: Option<String>,
+
+        /// Name of the file in which the synthetic metagenome is saved.
+        #[arg(short, long, required = true)]
+        dst: Option<String>,
+
+        /// Average length of a synthetic read.
+        #[arg(short, long, required = true)]
+        length: Option<i32>,
+
+        /// Maximum deviation for the length of a synthetic read. Default: 0.
+        #[arg(long, required = false)]
+        length_deviation: Option<i32>,
+
+        /// Average number of indels in a synthetic read. Default: 0.
+        #[arg(long, required = false)]
+        indels: Option<i32>,
+
+        /// Maximum deviation for the number of index in a synthetic read. Default: 0.
+        #[arg(long, required = false)]
+        indels_deviation: Option<i32>,
+    },
 }
 
 fn main() {
@@ -154,6 +185,15 @@ fn main() {
                 Err(error) => panic!("Genome installation failed: {}", error),
             }
         }
+        Some(Commands::SyntheticMetagenome {
+            src,
+            genomes,
+            dst,
+            length,
+            length_deviation,
+            indels,
+            indels_deviation,
+        }) => {}
         None => {}
     };
 }

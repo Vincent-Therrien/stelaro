@@ -1,9 +1,7 @@
 # stelaro
 
 Metagenomic toolbox designed for high performances and interpretability. Built with Rust,
-compatible with Python, and accelerated with multithreading and GPUs.
-
-You can use the project as:
+compatible with Python, and accelerated with multithreading and GPUs. Can be used as:
 
 - An **executable** that processes metagenomic data through the **command-line**.
 - A **library** that processes metagenomic data in Python or Rust **code**.
@@ -73,8 +71,8 @@ cargo build
 
 - `demonstrations`: Usage examples.
 - `documentation`: Documentation for Rust and Python.
-- `src`: **Rust** source code and **OpenCL** kernels.
-- `stelaro`: **Python** source code.
+- `src`: Rust source code and OpenCL kernels.
+- `stelaro`: Python source code.
 - `test`: Test cases for Rust and Python.
 
 
