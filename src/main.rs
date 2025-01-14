@@ -76,9 +76,9 @@ enum Commands {
 
     /// Create a simulated metagenomic sample dataset.
     SyntheticMetagenome {
-        /// Name of the file that contains the URLs of the genomes.
+        /// Path to the index file that contains the URLs of the genomes.
         #[arg(short, long, required = true)]
-        src: Option<String>,
+        index: Option<String>,
 
         /// Name of the directory that contains the installed genomes.
         #[arg(short, long, required = true)]
@@ -87,6 +87,10 @@ enum Commands {
         /// Name of the file in which the synthetic metagenome is saved.
         #[arg(short, long, required = true)]
         dst: Option<String>,
+
+        /// Number of reads to generate.
+        #[arg(short, long, required = true)]
+        reads: Option<i32>,
 
         /// Average length of a synthetic read.
         #[arg(short, long, required = true)]
@@ -100,7 +104,7 @@ enum Commands {
         #[arg(long, required = false)]
         indels: Option<i32>,
 
-        /// Maximum deviation for the number of index in a synthetic read. Default: 0.
+        /// Maximum deviation for the number of indels in a synthetic read. Default: 0.
         #[arg(long, required = false)]
         indels_deviation: Option<i32>,
     },
@@ -186,14 +190,94 @@ fn main() {
             }
         }
         Some(Commands::SyntheticMetagenome {
-            src,
+            index,
             genomes,
             dst,
+            reads,
             length,
             length_deviation,
             indels,
             indels_deviation,
-        }) => {}
+        }) => {
+            let index: &str = match index {
+                Some(i) => i.as_str(),
+                None => panic!("No source directory provided."),
+            };
+            let index = Path::new(index);
+            let genomes: &str = match genomes {
+                Some(i) => i.as_str(),
+                None => panic!("No genome directory provided."),
+            };
+            let genomes = Path::new(genomes);
+            let dst: &str = match dst {
+                Some(d) => d.as_str(),
+                None => panic!("No output directory provided."),
+            };
+            let dst = Path::new(dst);
+            let reads: u32 = match reads {
+                Some(i) => {
+                    if *i > 0 {
+                        *i as u32
+                    } else {
+                        panic!("The number of reads must be positive and non-zero.")
+                    }
+                }
+                None => panic!("No number of reads provided."),
+            };
+            let length: u32 = match length {
+                Some(i) => {
+                    if *i > 0 {
+                        *i as u32
+                    } else {
+                        panic!("The length must be positive and non-zero.")
+                    }
+                }
+                None => panic!("No length provided."),
+            };
+            let length_deviation: u32 = match length_deviation {
+                Some(i) => {
+                    if *i > 0 && *i < length as i32 {
+                        *i as u32
+                    } else {
+                        panic!("The length deviation must be less than the length and positive.")
+                    }
+                }
+                None => 0,
+            };
+            let indels: u32 = match indels {
+                Some(i) => {
+                    if *i > 0 {
+                        *i as u32
+                    } else {
+                        panic!("The number of indels must be positive and non-zero.")
+                    }
+                }
+                None => 0,
+            };
+            let indels_deviation: u32 = match indels_deviation {
+                Some(i) => {
+                    if *i > 0 && *i < indels as i32 {
+                        *i as u32
+                    } else {
+                        panic!("The number of indels deviation must be less than the number of indels and positive.")
+                    }
+                }
+                None => 0,
+            };
+            match data::synthetic_metagenome(
+                index,
+                genomes,
+                dst,
+                reads,
+                length,
+                length_deviation,
+                indels,
+                indels_deviation,
+            ) {
+                Ok(_) => (),
+                Err(error) => panic!("Genome installation failed: {}", error),
+            }
+        }
         None => {}
     };
 }

@@ -10,3 +10,15 @@
 """
 
 __all__ = ["ncbi", ]
+
+
+def synthetic_metagenome(
+        src: str,
+        genomes: str,
+        dst: str,
+        length: int,
+        length_deviation: int = 0,
+        indels: int = 0,
+        indels_deviation: int = 0
+        ) -> None:
+    pass

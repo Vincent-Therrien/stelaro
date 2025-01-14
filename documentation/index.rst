@@ -20,6 +20,14 @@ stelaro
    Data
 
 
+Improve upon the following software solutions:
+
+- Cytoscape - network analysis (massive data, metagenomics, ...)
+- Avoid contamination (https://pmc.ncbi.nlm.nih.gov/articles/PMC10653788/)
+- Train for specific datasets
+-
+
+
 
 Indices and tables
 ==================

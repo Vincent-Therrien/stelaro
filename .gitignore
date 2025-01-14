@@ -37,6 +37,7 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+*.pyd
 
 # Documentation
 documentation/_autosummary/*

@@ -1,12 +1,12 @@
 use log::info;
-// use rand::Rng;
+use rand::Rng;
 /// Interface functions for the `data` module.
 use std::fs::{remove_file, File};
 use std::io::Error;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
-use crate::io;
+// use crate::io;
 use crate::utils::progress;
 
 mod download;
@@ -91,43 +91,46 @@ pub fn install_genomes(index: &Path, dst: &Path, force: bool) -> Result<(), Erro
     Ok(())
 }
 
-// /// Simulate one sequence from a reference genome.
-// fn simulate_sequence(src: &Path, range: (u64, u64)) -> Result<String, Error> {
-//     Ok(())
-// }
+/// Simulate one sequence from a reference genome.
+fn simulate_sequence(src: &Path, length: u32, indels: u32) -> Result<String, Error> {
+    let mut sequence = String::new();
+    Ok(sequence)
+}
 
-// /// Simulate a metagenomic experiment by randomly sampling sequences from a set of genomes.
-// /// * `index`: Index file that contains the list of genomes to sample. Each line must be formatted
-// ///   as: `<genome file name><tab><genome download URL><tab><optional informative fields>`.
-// /// * `src`: Directory that contains the installed genomes.
-// /// * `dst`: File in which to save the metagenomic simulation. The sequences are saved in the FASTA
-// ///   format. Each identifier is formatted as: `<genome ID> <start index> <end index>`.
-// /// * `range`: Minimum and maximum lengths of the simulated metagenomic sequences. The length of
-// ///   each sequence is determined with a uniform probability distribution.
-// /// * `n_sequences`: Number of simulated sequences to generate from the genomes.
-// /// * `indel`: Minimum and maximum number of indels to randomly add in each simulated sequence.
-// ///   If no value is provided, no indels are added.
-// pub fn synthetic_metagenome(
-//     index: &Path,
-//     src: &Path,
-//     dst: &Path,
-//     n_sequences: u64,
-//     range: (u64, u64),
-//     indels: Option<(u64, u64)>,
-// ) -> Result<(), Error> {
-//     let mut rng = rand::thread_rng();
-//     let delta = match range {
-//         (a, b) => {
-//             if a >= b {
-//                 panic!("The first element of `range` must be less than the second element.");
-//             } else {
-//                 b - a
-//             }
-//         }
-//     };
-//     let pb = progress::new_bar(n_sequences as u64);
-//     for i in 0..n_sequences {
-//         pb.inc(1);
-//     }
-//     Ok(())
-// }
+/// Simulate a metagenomic experiment by randomly sampling sequences from a set of genomes.
+/// * `index`: Index file that contains the list of genomes to sample. Each line must be formatted
+///   as: `<genome file name><tab><genome download URL><tab><optional informative fields>`.
+/// * `genomes`: Directory that contains the installed genomes.
+/// * `dst`: File in which to save the metagenomic simulation. The sequences are saved in the FASTA
+///   format. Each identifier is formatted as: `<genome ID> <start index> <end index>`.
+/// * `reads`: Number of sequences to generate.
+/// * `length`: Average length of a generated sequence.
+/// * `length_deviation`: Maximum deviation for the number of nucleotides in a generated sequence.
+/// * `indels`: Average number of indels in a generated sequence.
+/// * `indels_deviation`: Maximum deviation for the number of indels in a generated sequence.
+pub fn synthetic_metagenome(
+    index: &Path,
+    genomes: &Path,
+    dst: &Path,
+    reads: u32,
+    length: u32,
+    length_deviation: u32,
+    indels: u32,
+    indels_deviation: u32,
+) -> Result<(), Error> {
+    let mut rng = rand::thread_rng();
+    let pb = progress::new_bar(reads as u64);
+    for i in 0..reads {
+        let n: u32 = rng.gen_range(length - length_deviation..length + length_deviation);
+        let i: u32 = rng.gen_range(indels - indels_deviation..indels + indels_deviation);
+        let read = match simulate_sequence(index, n, i) {
+            Ok(i) => i,
+            Err(error) => {
+                info!("Failed to generate a read.");
+                String::new()
+            }
+        };
+        pb.inc(1);
+    }
+    Ok(())
+}
