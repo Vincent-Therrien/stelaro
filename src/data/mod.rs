@@ -103,13 +103,14 @@ fn simulate_sequence(src: &Path, length: u32, indels: u32) -> Result<(u64, Strin
 /// resulting file is in the FASTA format whose reads are formatted as follows:
 ///
 /// ---
-/// ><genome_file_name><tab><offset><tab><indels>
+/// ><genome_file_name><tab><original sequence><tab><offset><tab><indels>
 /// <sequence>
 ///
 /// ---
 ///
-/// Where `genome_file_name` identifies the source genome for the sequence, `offset` is the index of
-/// the nucleotide in the reference genome at which the sampled sequence starts, and `indels` is the
+/// Where `genome_file_name` identifies the source genome for the sequence, `original sequence` is
+/// the name of the sequence in the reference genome used to sample the synthetic read, `offset` is
+/// the number of nucleotides skipped at the start of the reference sequence, and `indels` is the
 /// number of introduced indels.
 ///
 /// Arguments
