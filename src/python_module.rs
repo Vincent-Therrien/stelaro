@@ -16,9 +16,10 @@ fn read_fasta<'py>(py: Python<'py>, filename: String) -> PyResult<Bound<'_, PyAn
     let result = sequence::read_fasta(path);
     match result {
         Ok(value) => {
-            let list = Sequences{
+            let list = Sequences {
                 obj: value.iter().cloned().collect(),
-            }.into_pyobject(py)?;
+            }
+            .into_pyobject(py)?;
             Ok(list.into_any())
         }
         Err(_e) => {
@@ -38,9 +39,10 @@ fn read_fastq<'py>(py: Python<'py>, filename: String) -> PyResult<Bound<'_, PyAn
     let result = sequence::read_fastq(path);
     match result {
         Ok(value) => {
-            let list = QSequences{
+            let list = QSequences {
                 obj: value.iter().cloned().collect(),
-            }.into_pyobject(py)?;
+            }
+            .into_pyobject(py)?;
             Ok(list.into_any())
         }
         Err(_e) => {
