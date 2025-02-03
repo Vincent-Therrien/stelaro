@@ -3,23 +3,23 @@ use crate::io::sequence;
 use numpy::ndarray::{ArrayD, ArrayViewD};
 use numpy::{IntoPyArray, PyArrayDyn, PyReadonlyArrayDyn};
 use pyo3::prelude::*;
-use pyo3::types::{PyList, PyTuple};
 use std::path::Path;
 
+#[derive(IntoPyObject)]
+struct Sequences {
+    obj: Vec<(String, String)>,
+}
+
 #[pyfunction]
-/// Todo: replace `PyList::new_bound` by `PyList::new` in pyo3 version 0.23.0.
-fn read_fasta<'py>(py: Python<'py>, filename: String) -> PyResult<PyObject> {
+fn read_fasta<'py>(py: Python<'py>, filename: String) -> PyResult<Bound<'_, PyAny>> {
     let path = Path::new(&filename);
     let result = sequence::read_fasta(path);
     match result {
         Ok(value) => {
-            let py_list = PyList::new_bound(
-                py,
-                value
-                    .iter()
-                    .map(|(s1, s2)| PyTuple::new_bound(py, &[s1.as_str(), s2.as_str()])),
-            );
-            return Ok(py_list.to_object(py));
+            let list = Sequences{
+                obj: value.iter().cloned().collect(),
+            }.into_pyobject(py)?;
+            Ok(list.into_any())
         }
         Err(_e) => {
             panic!("Did not find the file `{}`.", filename);
@@ -27,20 +27,21 @@ fn read_fasta<'py>(py: Python<'py>, filename: String) -> PyResult<PyObject> {
     }
 }
 
+#[derive(IntoPyObject)]
+struct QSequences {
+    obj: Vec<(String, String, Vec<u8>)>,
+}
+
 #[pyfunction]
-/// Todo: replace `PyList::new_bound` by `PyList::new` in pyo3 version 0.23.0.
-fn read_fastq<'py>(py: Python<'py>, filename: String) -> PyResult<PyObject> {
+fn read_fastq<'py>(py: Python<'py>, filename: String) -> PyResult<Bound<'_, PyAny>> {
     let path = Path::new(&filename);
     let result = sequence::read_fastq(path);
     match result {
         Ok(value) => {
-            let py_list = PyList::empty_bound(py);
-            for (id, seq, quality) in value {
-                let integers: Vec<i32> = quality.iter().map(|&x| x as i32).collect();
-                let py_tuple = (id, seq, integers).to_object(py);
-                py_list.append(py_tuple)?;
-            }
-            return Ok(py_list.to_object(py));
+            let list = QSequences{
+                obj: value.iter().cloned().collect(),
+            }.into_pyobject(py)?;
+            Ok(list.into_any())
         }
         Err(_e) => {
             panic!("Did not find the file `{}`.", filename);
@@ -64,7 +65,7 @@ fn axb<'py>(
     let x = x.as_array();
     let y = y.as_array();
     let z = axpy(a, x, y);
-    z.into_pyarray_bound(py)
+    z.into_pyarray(py)
 }
 
 #[pyfunction]

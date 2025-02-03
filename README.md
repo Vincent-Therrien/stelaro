@@ -58,6 +58,7 @@ cargo build
 
 ## Planned features
 
+- [ ] Use uv instead of pip: https://github.com/PyO3/maturin/issues/2314
 - [ ] Create synthetic datasets.
 - [ ] Stream data from large file collections.
 - [ ] Process metagenomic data with k-mer and graph-based methods.

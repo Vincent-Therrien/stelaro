@@ -56,7 +56,7 @@ pub fn read_fasta(path: &Path) -> io::Result<Vec<(String, String)>> {
     Ok(fasta_data)
 }
 
-/// Read one FASTA sequence from the reader until `n` sequences are obtained.
+/// Read FASTA sequences from the reader until `n` sequences are obtained.
 pub fn read_fasta_section(reader: BufReader<File>, n: u32) -> io::Result<Vec<(String, String)>> {
     let mut lines = reader.lines();
     let mut current_lines = Vec::new();
@@ -86,6 +86,31 @@ pub fn read_fasta_section(reader: BufReader<File>, n: u32) -> io::Result<Vec<(St
         fasta_data.push(process_fasta_section(&current_lines).unwrap());
     }
     Ok(fasta_data)
+}
+
+/// Read the ith sequence in a FASTA file.
+pub fn read_sequence_at(path: &Path, i: u32) -> io::Result<(String, String)> {
+    let file = File::open(path)?;
+    let reader = BufReader::new(file);
+    let mut lines = reader.lines();
+    let mut current_lines = Vec::new();
+    if let Some(first_line) = lines.next() {
+        let first_line = first_line?;
+        current_lines.push(first_line);
+    }
+    let mut index = 0;
+    for line in lines {
+        let line = line?;
+        if let Some(first_char) = line.chars().next() {
+            if first_char == FASTA_ID_LINE_BEGINNING {
+                if index == i {
+                    return Ok(process_fasta_section(&current_lines).unwrap());
+                }
+                index += 1;
+            }
+        }
+    }
+    Ok((String::new(), String::new()))
 }
 
 pub fn count_fasta_sequences(path: &Path) -> io::Result<u32> {
