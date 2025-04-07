@@ -13,7 +13,7 @@ const FASTQ_LINE_SPLIT_BEGINNING: char = '+';
 // FASTA
 
 /// Process a vector of lines corresponding to one sequence in a FASTA file.
-fn process_fasta_section(lines: &Vec<String>) -> Result<(String, String), Error> {
+fn process_fasta_section(lines: &Vec<String>) -> Result<(String, String), Error> { // TODO: Add a test case
     let mut id = String::new();
     let mut sequence = String::new();
     let mut id_passed = false;
@@ -92,25 +92,23 @@ pub fn read_fasta_section(reader: BufReader<File>, n: u32) -> io::Result<Vec<(St
 pub fn read_sequence_at(path: &Path, i: u32) -> io::Result<(String, String)> {
     let file = File::open(path)?;
     let reader = BufReader::new(file);
-    let mut lines = reader.lines();
+    let lines = reader.lines();
     let mut current_lines = Vec::new();
-    if let Some(first_line) = lines.next() {
-        let first_line = first_line?;
-        current_lines.push(first_line);
-    }
     let mut index = 0;
     for line in lines {
         let line = line?;
+        current_lines.push(line.clone());
         if let Some(first_char) = line.chars().next() {
-            if first_char == FASTA_ID_LINE_BEGINNING {
+            if first_char == FASTA_ID_LINE_BEGINNING && i > 0 {
                 if index == i {
                     return Ok(process_fasta_section(&current_lines).unwrap());
                 }
                 index += 1;
+                current_lines.clear();
             }
         }
     }
-    Ok((String::new(), String::new()))
+    Ok(process_fasta_section(&current_lines).unwrap())
 }
 
 pub fn count_fasta_sequences(path: &Path) -> io::Result<u32> {

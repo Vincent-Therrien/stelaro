@@ -184,8 +184,14 @@ pub fn synthetic_metagenome(
         }
     };
     for i in 0..reads {
-        let i_length: u32 = rng.gen_range(length - length_deviation..length + length_deviation);
-        let i_indels: u32 = rng.gen_range(indels - indels_deviation..indels + indels_deviation);
+        let i_length: u32 = match length_deviation {
+            0 => 0,
+            _ => rng.gen_range(length - length_deviation..length + length_deviation),
+        };
+        let i_indels: u32 = match indels_deviation {
+            0 => 0,
+            _ => rng.gen_range(indels - indels_deviation..indels + indels_deviation),
+        };
         let genome_identifier = genome_identifiers.choose(&mut rng).unwrap();
         let genome_filename = Path::new(&genome_identifier);
         let genome = genomes.join(genome_filename);

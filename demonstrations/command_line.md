@@ -100,4 +100,13 @@ The files listed in `data/sample/index.tsv` should be be installed in the `data/
 
 ### Simulate a Metagenomic Experiment
 
-To do
+Simulate a metagenomic sequencing experiment by extracting substrings from the installed genomes.
+
+```
+stelarilo synthetic-metagenome \
+    --index data/sample/index.tsv \
+    --genomes data/sample \
+    --dst data/sample/synthetic_dataset.fasta
+    --reads 10 \
+    --length 100 \
+```
