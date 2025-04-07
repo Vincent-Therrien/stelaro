@@ -26,6 +26,15 @@ Several methods can classify sequences of a sample into taxa:
 - **Phylogenetics** using models of sequence evolution
 
 
+GPU Acceleration
+----------------
+
+- 2012 homology search: https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0036060
+- 2012 analysis: https://link.springer.com/article/10.1186/1752-0509-6-S1-S16
+- 2021 sequence assembly: https://dl.acm.org/doi/abs/10.1145/3458817.3476212
+- 2021 classification: https://dl.acm.org/doi/abs/10.1145/3472456.3472460
+
+
 References
 ----------
 

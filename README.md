@@ -1,10 +1,11 @@
 # stelaro
 
-Metagenomic toolbox designed for high performances and interpretability. Built with Rust,
-compatible with Python, and accelerated with multithreading and GPUs. Can be used as:
+Metagenomic toolbox designed for high performances and interpretability.
 
-- An **executable** that processes metagenomic data through the **command-line**.
-- A **library** that processes metagenomic data in Python or Rust **code**.
+- Built with Rust.
+- Accelerated by multithreading and GPUs.
+- Runs as an **executable** that processes metagenomic data through the **command-line**.
+- Also runs as a **library** that processes metagenomic data in Rust or Python code.
 
 Check the [demonstrations](demonstrations/README.md) out for usage examples.
 
@@ -23,17 +24,17 @@ to install the runtime. On Windows, install the OpenCL runtime from the website 
 your GPU. After installing the runtime, you may have to place the file `libOpenCL.so` (Linux) or
 `OpenCL.lib` (Windows) in the directory of the project to build `stelaro` with GPU support.
 
+Build the full **Rust** library and executable by executing:
+
+```
+cargo build --features opencl
+```
+
 Install the full **Python** package with [Maturin](https://pypi.org/project/maturin/0.8.2/) by
 executing:
 
 ```
 maturin develop --features opencl
-```
-
-Build the full **Rust** library and executable by executing:
-
-```
-cargo build --features opencl
 ```
 
 
@@ -42,17 +43,17 @@ cargo build --features opencl
 You can install `stelaro` **without GPU support**. All features will be available, but there will be
 no hardware acceleration. This approach is only recommended if your system does not support OpenCL.
 
-Install the CPU-only  **Python** package with [Maturin](https://pypi.org/project/maturin/0.8.2/) by
-executing:
-
-```
-maturin develop
-```
-
 Build the CPU-only **Rust** library and executable by executing:
 
 ```
 cargo build
+```
+
+Install the CPU-only **Python** package with [Maturin](https://pypi.org/project/maturin/0.8.2/) by
+executing:
+
+```
+maturin develop
 ```
 
 

@@ -11,7 +11,7 @@ struct Sequences {
 }
 
 #[pyfunction]
-fn read_fasta<'py>(py: Python<'py>, filename: String) -> PyResult<Bound<'_, PyAny>> {
+fn read_fasta<'py>(py: Python<'py>, filename: String) -> PyResult<Bound<'py, PyAny>> {
     let path = Path::new(&filename);
     let result = sequence::read_fasta(path);
     match result {
@@ -34,7 +34,7 @@ struct QSequences {
 }
 
 #[pyfunction]
-fn read_fastq<'py>(py: Python<'py>, filename: String) -> PyResult<Bound<'_, PyAny>> {
+fn read_fastq<'py>(py: Python<'py>, filename: String) -> PyResult<Bound<'py, PyAny>> {
     let path = Path::new(&filename);
     let result = sequence::read_fastq(path);
     match result {

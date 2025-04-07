@@ -104,7 +104,6 @@ sphinxcontrib-jsmath==1.0.1
 sphinxcontrib-qthelp==2.0.0
 sphinxcontrib-serializinghtml==2.0.0
 stack-data==0.6.3
--e git+ssh://git@github.com/Vincent-Therrien/stelaro.git@5f3fe81aabd838aee6fd5be015cab965c2239992#egg=stelaro
 terminado==0.18.1
 tinycss2==1.4.0
 tornado==6.4.1
