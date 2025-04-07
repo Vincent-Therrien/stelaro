@@ -1,4 +1,4 @@
-//! NCBI data downlaod module.
+//! NCBI data download module.
 //! `NUCL_TAXID_URLS` refers to the nucleotide taxonomy identifier mappings.
 
 use log::info;
@@ -132,6 +132,12 @@ pub fn download_genome_summaries(path: &Path, force: bool) -> Result<(), Error> 
     Ok(())
 }
 
+/// Sample a list of genome summaries.
+/// * `src` - Directory that contains a downloaded genome summary.
+/// * `dst` - File in which to write the list of
+/// * sampling - Which types of organisms to sample; `full` for all genomes, `micro` for
+///   microorganisms only.
+/// * fraction - Fraction of genomes to include. Comprised between 0.0 and 1.0.
 pub fn sample_genomes(
     src: &Path,
     dst: &Path,

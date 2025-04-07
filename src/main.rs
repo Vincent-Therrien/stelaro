@@ -47,7 +47,7 @@ enum Commands {
         #[arg(short, long, required = true)]
         dst: Option<String>,
 
-        /// Indicates how to perform sampling. Supported options:
+        /// Genome types to include. Supported options:
         /// `full` (sample genomes URLs),
         /// `micro` (sample genomes of archaea, bacteria, fungi, and viruses).
         /// Default: `micro`.

@@ -2,10 +2,10 @@
 
 Metagenomic toolbox designed for high performances and interpretability.
 
-- Built with Rust.
-- Accelerated by multithreading and GPUs.
 - Runs as an **executable** that processes metagenomic data through the **command-line**.
-- Also runs as a **library** that processes metagenomic data in Rust or Python code.
+- Also runs as a **library** for Rust and Python.
+- Built with Rust.
+- Accelerated with multithreading and GPUs.
 
 Check the [demonstrations](demonstrations/README.md) out for usage examples.
 
@@ -59,7 +59,6 @@ maturin develop
 
 ## Planned features
 
-- [ ] Use uv instead of pip: https://github.com/PyO3/maturin/issues/2314
 - [ ] Create synthetic datasets.
 - [ ] Stream data from large file collections.
 - [ ] Process metagenomic data with k-mer and graph-based methods.

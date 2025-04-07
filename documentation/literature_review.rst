@@ -1,7 +1,7 @@
 Literature Review
 =================
 
-Metagenomics tools analyze microbiomes from sequencing data, which makes them useful in biological
+Metagenomic tools analyze microbiomes from sequencing data, which makes them useful in biological
 research to detect pathogens, study antimicrobial resistance, and predict illnesses, among others.
 Although not yet used in clinical settings, many researchers have developed models that can process
 metagenomic data with increasing efficacy :ref:`roy2024:`.
