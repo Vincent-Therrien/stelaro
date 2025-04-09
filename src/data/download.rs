@@ -42,7 +42,7 @@ pub fn https(url: &str, dst: &Path, display_progress: bool) -> Result<(), Box<dy
     Ok(())
 }
 
-pub fn decompress_gz(src: &Path, dst: &Path, display_progress: bool) -> io::Result<()> {
+pub fn decompress_gz(src: &Path, dst: &Path, display_progress: bool) -> io::Result<u64> {
     let gz_file = File::open(src)?;
     let mut decompressed_file = File::create(dst)?;
     let total_size = gz_file.metadata()?.len();
@@ -57,15 +57,17 @@ pub fn decompress_gz(src: &Path, dst: &Path, display_progress: bool) -> io::Resu
     };
     let mut buffered_reader = BufReader::new(&mut decoder);
     let mut buffer = [0; BUFFER_SIZE];
+    let mut total_n_bytes: u64 = 0;
     loop {
         let bytes_read = buffered_reader.read(&mut buffer)?;
         if bytes_read == 0 {
             break;
         }
+        total_n_bytes += bytes_read as u64;
         copy(&mut &buffer[..bytes_read], &mut decompressed_file)?;
         if pb.is_some() {
             pb.as_ref().unwrap().inc(bytes_read as u64);
         }
     }
-    Ok(())
+    Ok(total_n_bytes)
 }

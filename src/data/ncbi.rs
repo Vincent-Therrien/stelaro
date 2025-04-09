@@ -146,6 +146,7 @@ pub fn sample_genomes(
 ) -> Result<(), Error> {
     const ID_COLUMN: usize = 0;
     const URL_COLUMN: usize = 19;
+    const GENOME_SIZE_COLUMN: usize = 25;
     let categories = match sampling.as_str() {
         "micro" => MICRO_REFERENCE_GENOME_LIST,
         "full" => REFERENCE_GENOME_LIST,
@@ -159,7 +160,7 @@ pub fn sample_genomes(
     };
     let mut count: u32 = 0;
     let mut rng = rand::thread_rng();
-    let _ = file.write(format!("ID\tURL\tcategory\n").as_bytes());
+    let _ = file.write(format!("ID\tURL\tcategory\tgenome_size\n").as_bytes());
     let pb = progress::new_bar(categories.len() as u64);
     for category in categories {
         let src_path = src.join(format!("{}.txt", category));
@@ -180,7 +181,9 @@ pub fn sample_genomes(
             let root_url = elements[URL_COLUMN].to_string();
             let fna_name = format!("{}{}", root_url.split("/").last().unwrap(), FNA_FILE_ENDING);
             let fna_url = format!("{}/{}", elements[URL_COLUMN], fna_name);
-            let _ = file.write(format!("{}\t{}\t{}\n", id, fna_url, category).as_bytes());
+            let genome_size = elements[GENOME_SIZE_COLUMN];
+            let _ = file
+                .write(format!("{}\t{}\t{}\t{}\n", id, fna_url, category, genome_size).as_bytes());
             count += 1;
         }
         pb.inc(1);

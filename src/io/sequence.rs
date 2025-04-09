@@ -1,19 +1,22 @@
 //! Sequence file input / output utility functions.
 
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::Error;
-use std::io::{self, BufRead, BufReader};
+use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
 const FASTA_ID_LINE_BEGINNING: char = '>';
 const FASTA_COMMENT_LINE_BEGINNING: char = ';';
 const FASTQ_ID_LINE_BEGINNING: char = '@';
 const FASTQ_LINE_SPLIT_BEGINNING: char = '+';
+const NUCLEOTIDE_CHARACTERS: [char; 5] = ['N', 'A', 'T', 'C', 'G'];
 
 // FASTA
 
 /// Process a vector of lines corresponding to one sequence in a FASTA file.
-fn process_fasta_section(lines: &Vec<String>) -> Result<(String, String), Error> { // TODO: Add a test case
+fn process_fasta_section(lines: &Vec<String>) -> Result<(String, String), Error> {
+    // TODO: Add a test case
     let mut id = String::new();
     let mut sequence = String::new();
     let mut id_passed = false;
@@ -56,8 +59,10 @@ pub fn read_fasta(path: &Path) -> io::Result<Vec<(String, String)>> {
     Ok(fasta_data)
 }
 
-/// Read FASTA sequences from the reader until `n` sequences are obtained.
-pub fn read_fasta_section(reader: BufReader<File>, n: u32) -> io::Result<Vec<(String, String)>> {
+/// Read `n` FASTA sequences from the reader.
+/// * `reader`: File reader
+/// * `n`: Number of sequences to read from the file reader.
+pub fn read_fasta_sequences(reader: BufReader<File>, n: u32) -> io::Result<Vec<(String, String)>> {
     let mut lines = reader.lines();
     let mut current_lines = Vec::new();
     let mut fasta_data = Vec::new();
@@ -88,27 +93,29 @@ pub fn read_fasta_section(reader: BufReader<File>, n: u32) -> io::Result<Vec<(St
     Ok(fasta_data)
 }
 
-/// Read the ith sequence in a FASTA file.
-pub fn read_sequence_at(path: &Path, i: u32) -> io::Result<(String, String)> {
-    let file = File::open(path)?;
-    let reader = BufReader::new(file);
-    let lines = reader.lines();
-    let mut current_lines = Vec::new();
-    let mut index = 0;
-    for line in lines {
-        let line = line?;
-        current_lines.push(line.clone());
-        if let Some(first_char) = line.chars().next() {
-            if first_char == FASTA_ID_LINE_BEGINNING && i > 0 {
-                if index == i {
-                    return Ok(process_fasta_section(&current_lines).unwrap());
-                }
-                index += 1;
-                current_lines.clear();
-            }
-        }
+/// Read a sequence in a FASTA file starting at the specified number of bytes.
+/// * `path`: FASTA file path.
+/// * `i`: Offset.
+/// * `n`: Number of bytes to read.
+pub fn read_fasta_section(path: &Path, i: u64, n: u64) -> io::Result<String> {
+    let mut file = File::open(path)?;
+    file.seek(SeekFrom::Start(i + 1))?;
+    // Read a few more bytes than specified to account for newline and carriage return characters.
+    let n_bytes_to_read = (n as f64 * 1.05).round() as usize;
+    let mut buffer = vec![0; n_bytes_to_read];
+    let bytes_read = file.read(&mut buffer)?;
+    let result = String::from_utf8_lossy(&buffer[..bytes_read])
+        .to_string()
+        .replace('\n', "")
+        .replace('\r', "");
+    let allowed: HashSet<char> = NUCLEOTIDE_CHARACTERS.into_iter().collect();
+    if result.chars().any(|c| !allowed.contains(&c)) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Encountered an ID.",
+        ));
     }
-    Ok(process_fasta_section(&current_lines).unwrap())
+    Ok(result.chars().take(n as usize).collect())
 }
 
 pub fn count_fasta_sequences(path: &Path) -> io::Result<u32> {

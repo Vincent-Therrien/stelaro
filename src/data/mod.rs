@@ -90,45 +90,51 @@ pub fn install_genomes(index: &Path, dst: &Path, force: bool) -> Result<(), Erro
     Ok(())
 }
 
-fn read_index_file(src: &Path) -> Result<Vec<String>, Error> {
-    let mut genomes = Vec::new();
+/// Read an index file whose rows are formatted as tab-separated values for genome ID, FTP URL,
+/// category, and genome size.
+/// * `src`: Index file path.
+///
+/// Returns a tuple containing the genome identifier and genome size.
+fn read_index_file(src: &Path) -> Result<Vec<(String, u64)>, Error> {
+    let mut index = Vec::new();
     let file = File::open(src)?;
     let reader = BufReader::new(file);
     let mut lines = reader.lines();
     lines.next(); // Skip the header.
     for line in lines {
         let line = line?;
-        let identifier: String = line.split("\t").collect::<Vec<&str>>()[0].to_string();
-        genomes.push(identifier);
+        let fields = line.split("\t").collect::<Vec<&str>>();
+        let identifier: String = fields[0].to_string();
+        let genome_size: u64 = fields[3].parse::<u64>().unwrap();
+        index.push((identifier, genome_size));
     }
-    Ok(genomes)
+    Ok(index)
 }
 
 /// Simulate one sequence from a reference genome.
 /// * `src`: Genome file path.
+/// * `genome_size`: Number of base pairs in the genome.
 /// * `length`: Number of nucleotides in the sequence ot generate.
 /// * `indels`: Number of indels to introduce.
 ///
-/// Returns a tuple formatted as: (sequence identifier, offset, sequence).
+/// Returns a tuple formatted as: (sequence, offset).
 fn simulate_sequence(
     src: &Path,
-    length: usize,
+    genome_size: u64,
+    length: u64,
     indels: u32,
-) -> Result<(String, u64, String), Error> {
-    let n_sequences = sequence::count_fasta_sequences(src)?;
-    let mut sequence_indices: Vec<u32> = (0..n_sequences).collect();
-    sequence_indices.shuffle(&mut thread_rng());
+) -> Result<(String, u64), Error> {
     let mut rng = rand::thread_rng();
-    for index in sequence_indices {
-        let (sequence_id, current_sequence) = sequence::read_sequence_at(src, index)?;
-        let len = current_sequence.len();
-        if len > length {
-            let offset: usize = rng.gen_range(0..len - length);
-            let synthetic_sequence = (&current_sequence[offset..offset + length]).to_string();
-            if indels > 0 {
-                // add indels
-            }
-            return Ok((sequence_id, offset as u64, synthetic_sequence));
+    for _ in 0..10 {
+        let offset = rng.gen_range(0..genome_size - length);
+        let sequence = match sequence::read_fasta_section(src, offset, length) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        if indels > 0 {
+            // to do
+        } else {
+            return Ok((sequence, offset));
         }
     }
     Err(Error::new(
@@ -173,7 +179,7 @@ pub fn synthetic_metagenome(
     indels: u32,
     indels_deviation: u32,
 ) -> Result<(), Error> {
-    let genome_identifiers = read_index_file(index).unwrap();
+    let index = read_index_file(index).unwrap();
     let mut rng = rand::thread_rng();
     let pb = progress::new_bar(reads as u64);
     let dst_repr = dst.to_str().unwrap().to_string();
@@ -185,30 +191,35 @@ pub fn synthetic_metagenome(
     };
     for i in 0..reads {
         let i_length: u32 = match length_deviation {
-            0 => 0,
+            0 => length,
             _ => rng.gen_range(length - length_deviation..length + length_deviation),
         };
         let i_indels: u32 = match indels_deviation {
             0 => 0,
             _ => rng.gen_range(indels - indels_deviation..indels + indels_deviation),
         };
-        let genome_identifier = genome_identifiers.choose(&mut rng).unwrap();
-        let genome_filename = Path::new(&genome_identifier);
-        let genome = genomes.join(genome_filename);
-        let (sequence_identifier, offset, read) =
-            match simulate_sequence(genome.as_path(), i_length as usize, i_indels) {
-                Ok(s) => s,
-                Err(_error) => {
-                    info!("Failed to generate a read.");
-                    (String::new(), 0, String::new())
-                }
-            };
-        let _ = output.write_fmt(format_args!(
-            ">{}\t{}\t{}\t{}\n",
-            genome_identifier, sequence_identifier, offset, i
-        ));
-        let _ = output.write_fmt(format_args!("{}\n\n", read));
-        pb.set_position(i as u64);
+        let index_row = index.choose(&mut rng).unwrap();
+        let (identifier, genome_size) = index_row;
+        let genome_filepath = genomes.join(Path::new(&identifier));
+        match simulate_sequence(
+            genome_filepath.as_path(),
+            *genome_size,
+            i_length as u64,
+            i_indels,
+        ) {
+            Ok((read, offset)) => {
+                let _ = output.write_fmt(format_args!(">{}\t{}\t{}\n", identifier, offset, i));
+                let _ = output.write_fmt(format_args!("{}\n\n", read));
+                pb.set_position(i as u64);
+            }
+            Err(_error) => {
+                info!(
+                    "Failed to generate a read: {} {}",
+                    genome_filepath.display(),
+                    genome_size
+                );
+            }
+        };
     }
     Ok(())
 }

@@ -22,7 +22,7 @@ mod io {
         }
         let file = File::open(path.as_path()).unwrap();
         let reader = BufReader::new(file);
-        let section_result = stelaro::io::sequence::read_fasta_section(reader, 1);
+        let section_result = stelaro::io::sequence::read_fasta_sequences(reader, 1);
         match section_result {
             Ok(value) => {
                 assert_eq!(value.len(), 1);
@@ -35,7 +35,7 @@ mod io {
         }
         let file = File::open(path.as_path()).unwrap();
         let reader2 = BufReader::new(file);
-        let section_result = stelaro::io::sequence::read_fasta_section(reader2, 2);
+        let section_result = stelaro::io::sequence::read_fasta_sequences(reader2, 2);
         match section_result {
             Ok(value) => {
                 assert_eq!(value.len(), 2);
@@ -110,6 +110,24 @@ mod io {
                 let (_, third_sequence, third_quality) = &value[2];
                 assert_eq!(third_sequence, "AACC");
                 assert_eq!(*third_quality, vec![0, 0, 0, 0]);
+            }
+            Err(_e) => {
+                panic!("Did not find the file.");
+            }
+        }
+    }
+
+    #[test]
+    fn fasta_section() {
+        let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        path.push("tests/data/nucleotide_sequence_long.fasta");
+        let result = stelaro::io::sequence::read_fasta_section(path.as_path(), 4, 71);
+        match result {
+            Ok(value) => {
+                assert_eq!(
+                    value,
+                    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAT"
+                );
             }
             Err(_e) => {
                 panic!("Did not find the file.");
