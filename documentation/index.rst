@@ -17,7 +17,6 @@ stelaro
    source-code-documentation
    literature_review
    benchmarks
-   Data
 
 
 Improve upon the following software solutions:

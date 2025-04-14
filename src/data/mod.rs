@@ -1,6 +1,5 @@
 use log::info;
-use rand::prelude::*;
-use rand::Rng;
+use rand::{seq::SliceRandom, Rng};
 use std::fs::{remove_file, File};
 use std::io::{BufRead, BufReader, Error, ErrorKind, Write};
 use std::path::Path;
@@ -111,6 +110,37 @@ fn read_index_file(src: &Path) -> Result<Vec<(String, u64)>, Error> {
     Ok(index)
 }
 
+/// Applies exactly `num_indels` insertions or deletions to the DNA sequence.
+/// Each indel is either an insertion (random nucleotides) or a deletion (removing existing nucleotides).
+/// `max_indel_size` controls the maximum size of a single insertion or deletion.
+fn insert_indels(seq: &str, num_indels: usize, max_indel_size: usize) -> String {
+    let mut rng = rand::thread_rng();
+    let mut dna: Vec<char> = seq.chars().collect();
+    let nucleotides = ['A', 'C', 'G', 'T'];
+
+    for _ in 0..num_indels {
+        let pos = rng.gen_range(0..=dna.len());
+        let indel_size = rng.gen_range(1..=max_indel_size);
+        let is_insertion = rng.gen_bool(0.5);
+
+        if is_insertion {
+            // Generate random bases to insert
+            let insertion: Vec<char> = (0..indel_size)
+                .map(|_| *nucleotides.choose(&mut rng).unwrap())
+                .collect();
+            dna.splice(pos..pos, insertion);
+        } else {
+            // Delete bases, but only if enough remain
+            let delete_len = indel_size.min(dna.len().saturating_sub(pos));
+            if delete_len > 0 {
+                dna.drain(pos..pos + delete_len);
+            }
+        }
+    }
+
+    dna.into_iter().collect()
+}
+
 /// Simulate one sequence from a reference genome.
 /// * `src`: Genome file path.
 /// * `genome_size`: Number of base pairs in the genome.
@@ -132,7 +162,7 @@ fn simulate_sequence(
             Err(_) => continue,
         };
         if indels > 0 {
-            // to do
+            return Ok((insert_indels(sequence.as_str(), indels as usize, 4), offset));
         } else {
             return Ok((sequence, offset));
         }
