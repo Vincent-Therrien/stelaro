@@ -9,6 +9,8 @@
     - License: MIT
 """
 
+import stelaro.stelaro as stelaro_rust
+
 __all__ = ["ncbi", ]
 
 
@@ -16,9 +18,12 @@ def synthetic_metagenome(
         src: str,
         genomes: str,
         dst: str,
+        reads: int,
         length: int,
         length_deviation: int = 0,
         indels: int = 0,
         indels_deviation: int = 0
         ) -> None:
-    pass
+    stelaro_rust.synthetic_metagenome(
+        src, genomes, dst, reads, length, length_deviation, indels, indels_deviation
+    )

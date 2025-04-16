@@ -105,6 +105,35 @@ fn install_genomes(input: String, dst: String) -> PyResult<()> {
     }
 }
 
+#[pyfunction]
+fn synthetic_metagenome(
+    index: String,
+    genomes: String,
+    dst: String,
+    reads: u32,
+    length: u32,
+    length_deviation: u32,
+    indels: u32,
+    indels_deviation: u32,
+) -> PyResult<()> {
+    let index = Path::new(&index);
+    let genomes = Path::new(&genomes);
+    let dst = Path::new(&dst);
+    match data::synthetic_metagenome(
+        index,
+        genomes,
+        dst,
+        reads,
+        length,
+        length_deviation,
+        indels,
+        indels_deviation,
+    ) {
+        Ok(_) => Ok(()),
+        Err(error) => panic!("Synthetic metagenome generation failed: {}", error),
+    }
+}
+
 #[pymodule]
 fn stelaro(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(read_fasta, m)?)?;
@@ -112,6 +141,7 @@ fn stelaro(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(install, m)?)?;
     m.add_function(wrap_pyfunction!(sample_genomes, m)?)?;
     m.add_function(wrap_pyfunction!(install_genomes, m)?)?;
+    m.add_function(wrap_pyfunction!(synthetic_metagenome, m)?)?;
     m.add_function(wrap_pyfunction!(axb, m)?)?;
     Ok(())
 }
