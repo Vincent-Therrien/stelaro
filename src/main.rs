@@ -15,7 +15,7 @@ struct Cli {
 enum Commands {
     /// Install (download and decompress) reference data.
     Install {
-        /// Origin of the data to install. Supported origins: ncbi
+        /// Origin of the data to install. Supported origins: ncbi, gtdb
         #[arg(short, long, required = true)]
         origin: Option<String>,
 
@@ -24,7 +24,7 @@ enum Commands {
         dst: Option<String>,
 
         /// Name of the dataset to install. Supported names:
-        /// taxonomy (~32 GB), genome_summaries (~175 MB)
+        /// taxonomy (~32 GB), genome_summaries (~175 MB), trees (~6 MB)
         #[arg(short, long, required = true)]
         name: Option<String>,
 

@@ -9,7 +9,9 @@ use crate::data::download;
 
 const SERVER_ROOT: &str = "https://data.ace.uq.edu.au/public/gtdb/data/releases/latest/";
 const TAXONOMY_RELEVANT_FILES: &'static [&'static str] = &[
-    "ar53.tree.gz",   // Archaea reference tree.
+    "ar53.tree.gz", // Archaea reference tree.
+    "ar53_taxonomy.tsv.gz",
+    "ar53_metadata.tsv.gz",
     "bac120.tree.gz", // Bacterial reference tree.
 ];
 

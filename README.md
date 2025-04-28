@@ -59,13 +59,10 @@ maturin develop
 
 ## Planned features
 
-- [ ] Create synthetic datasets.
-- [ ] Stream data from large file collections.
-- [ ] Process metagenomic data with k-mer and graph-based methods.
-- [ ] Visualize results
-- [ ] Measure performances
-- [ ] Upload the package to PyPI
-- [ ] Upload the library to crate.io.
+- [ ] Manipulate phylogenetic trees (GTDB, rustworkx) and matching reference genomes (NCBI).
+- [ ] Transform synthetic datasets into compact formats to train neural networks.
+- [ ] Integrate annotation data (CARD, VFDB, BacMet)
+- [ ] Define attention-based architectures and train neural networks (PyTorch).
 
 
 ## Organization
