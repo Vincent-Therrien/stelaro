@@ -63,6 +63,15 @@ The command downloads a list of tab-separated value files. Each row corresponds 
 assembly.
 
 
+#### GTDB Tree
+
+The following line downloads phylogenetic trees from the GTDB project (~6 MB).
+
+```
+stelarilo install --origin gtdb --name trees --dst data/gtdb_trees
+```
+
+
 ### Sample Genomes
 
 The following command reads genome summaries and outputs an **index** of sampled genomes. The index

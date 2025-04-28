@@ -1,5 +1,4 @@
 //! NCBI data download module.
-//! `NUCL_TAXID_URLS` refers to the nucleotide taxonomy identifier mappings.
 
 use log::info;
 use rand::Rng;
@@ -60,22 +59,6 @@ fn is_already_downloaded(local_checksum: &Path, remote_checksum: String) -> bool
     local == remote
 }
 
-fn decompress_archive(local_path: &Path) {
-    let decompressed_name = local_path.with_extension("");
-    if !Path::new(&decompressed_name).exists() {
-        let _ = download::decompress_gz(&local_path, &decompressed_name, false);
-    } else {
-        info!(
-            "The file `{}` is already decompressed.",
-            decompressed_name.display()
-        );
-    }
-    match fs::remove_file(local_path) {
-        Ok(_) => info!("Deleted the archive: {}", local_path.display()),
-        Err(_) => (),
-    }
-}
-
 /// Download taxonomy from the NCBI
 /// * `path` - Directory in which to save the taxonomy.
 /// * `force` - If true, download even if the files are already installed.
@@ -88,7 +71,7 @@ pub fn download_taxonomy(path: &Path, force: bool) -> Result<(), Error> {
         let local_checksum_path = path.join(format!("{}{}", filename, CHECKSUM_SUFFIX));
         if force {
             let _ = download::https(&url, &local_path, true);
-            decompress_archive(&local_path);
+            download::decompress_archive(&local_path);
         } else {
             if is_already_downloaded(&local_checksum_path, checksum_url.to_string()) {
                 info!("The file `{}` is already installed.", filename);
@@ -96,10 +79,10 @@ pub fn download_taxonomy(path: &Path, force: bool) -> Result<(), Error> {
                 let _ = download::https(&url, &local_path, true);
                 let _ = download::https(&checksum_url, &local_checksum_path, true);
             }
-            decompress_archive(&local_path);
+            download::decompress_archive(&local_path);
         }
     }
-    info!("The taxonomy is installed at `{}`.", path.display());
+    info!("The NCBI taxonomy is installed at `{}`.", path.display());
     Ok(())
 }
 

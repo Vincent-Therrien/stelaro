@@ -8,6 +8,7 @@ use crate::io::sequence;
 use crate::utils::progress;
 
 mod download;
+mod gtdb;
 mod ncbi;
 
 /// Install a dataset from an authority source.
@@ -20,7 +21,11 @@ pub fn install(origin: String, name: String, dst: &Path, force: bool) -> Result<
         "ncbi" => match name.as_str() {
             "taxonomy" => ncbi::download_taxonomy(dst, force),
             "genome_summaries" => ncbi::download_genome_summaries(dst, force),
-            _ => panic!("Unsupported name `{}`.", name),
+            _ => panic!("Unsupported name `{}` for source `NCBI`.", name),
+        },
+        "gtdb" => match name.as_str() {
+            "trees" => gtdb::install_trees(dst, force),
+            _ => panic!("Unsupported name `{}` for source `GTDB`.", name),
         },
         _ => panic!("Unsupported origin `{}`.", origin),
     };

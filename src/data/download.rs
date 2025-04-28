@@ -1,7 +1,9 @@
 use flate2::read::GzDecoder;
+use log::info;
 use reqwest::blocking::Client;
 use reqwest::header::CONTENT_LENGTH;
 use std::error::Error;
+use std::fs;
 use std::fs::File;
 use std::io::{self, copy, BufReader, Read, Write};
 use std::path::Path;
@@ -70,4 +72,20 @@ pub fn decompress_gz(src: &Path, dst: &Path, display_progress: bool) -> io::Resu
         }
     }
     Ok(total_n_bytes)
+}
+
+pub fn decompress_archive(local_path: &Path) {
+    let decompressed_name = local_path.with_extension("");
+    if !Path::new(&decompressed_name).exists() {
+        let _ = decompress_gz(&local_path, &decompressed_name, false);
+    } else {
+        info!(
+            "The file `{}` is already decompressed.",
+            decompressed_name.display()
+        );
+    }
+    match fs::remove_file(local_path) {
+        Ok(_) => info!("Deleted the archive: {}", local_path.display()),
+        Err(_) => (),
+    }
 }
