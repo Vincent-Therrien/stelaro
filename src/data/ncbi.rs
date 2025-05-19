@@ -133,6 +133,9 @@ pub fn sample_genomes(
     let categories = match sampling.as_str() {
         "micro" => MICRO_REFERENCE_GENOME_LIST,
         "full" => REFERENCE_GENOME_LIST,
+        "archaea" => &["archaea"],
+        "bacteria" => &["bacteria"],
+        "viral" => &["viral"],
         _ => panic!("Unrecognized sampling: {}", sampling),
     };
     let dst_repr = dst.to_str().unwrap().to_string();
