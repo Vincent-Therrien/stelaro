@@ -1,7 +1,8 @@
 use crate::data;
 use crate::io::sequence;
+use ndarray::Array3;
 use numpy::ndarray::{ArrayD, ArrayViewD};
-use numpy::{IntoPyArray, PyArrayDyn, PyReadonlyArrayDyn};
+use numpy::{IntoPyArray, PyArray3, PyArrayDyn, PyReadonlyArrayDyn};
 use pyo3::prelude::*;
 use std::path::Path;
 
@@ -49,25 +50,6 @@ fn read_fastq<'py>(py: Python<'py>, filename: String) -> PyResult<Bound<'py, PyA
             panic!("Did not find the file `{}`.", filename);
         }
     }
-}
-
-// TODO: Remove this function after the binding is more developed.
-fn axpy(a: f64, x: ArrayViewD<'_, f64>, y: ArrayViewD<'_, f64>) -> ArrayD<f64> {
-    a * &x + &y
-}
-
-// TODO: Remove this function after the binding is more developed.
-#[pyfunction]
-fn axb<'py>(
-    py: Python<'py>,
-    a: f64,
-    x: PyReadonlyArrayDyn<'py, f64>,
-    y: PyReadonlyArrayDyn<'py, f64>,
-) -> Bound<'py, PyArrayDyn<f64>> {
-    let x = x.as_array();
-    let y = y.as_array();
-    let z = axpy(a, x, y);
-    z.into_pyarray(py)
 }
 
 #[pyfunction]
@@ -134,6 +116,24 @@ fn synthetic_metagenome(
     }
 }
 
+#[pyfunction]
+fn synthetic_sample<'py>(
+    py: Python<'py>,
+    index: String,
+    genomes: String,
+    reads: u32,
+    length: u32,
+    length_deviation: u32,
+    indels: u32,
+    indels_deviation: u32,
+    encoding: String,
+) -> Bound<'py, PyArray3<f32>> {
+    let dimension = length + length_deviation;
+    let mut tensor = Array3::<f32>::zeros((reads as usize, dimension as usize, 1));
+    // TODO: fill the tensor
+    tensor.into_pyarray(py)
+}
+
 #[pymodule]
 fn stelaro(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(read_fasta, m)?)?;
@@ -142,6 +142,6 @@ fn stelaro(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sample_genomes, m)?)?;
     m.add_function(wrap_pyfunction!(install_genomes, m)?)?;
     m.add_function(wrap_pyfunction!(synthetic_metagenome, m)?)?;
-    m.add_function(wrap_pyfunction!(axb, m)?)?;
+    m.add_function(wrap_pyfunction!(synthetic_sample, m)?)?;
     Ok(())
 }
