@@ -169,7 +169,7 @@ fn synthetic_sample<'py>(
     tensor.into_pyarray(py)
 }
 /// from stelaro.stelaro import synthetic_sample
-/// synthetic_sample("data/classification_dataset/bacteria.tsv", "data/classification_dataset/", 5, 10, 0, 0, 0, "x")
+/// synthetic_sample("data/classification_dataset/bacteria.tsv", "data/classification_dataset/", 5, 10, 0, 0, 0, "onehot")
 
 #[pymodule]
 fn stelaro(m: &Bound<'_, PyModule>) -> PyResult<()> {

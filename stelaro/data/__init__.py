@@ -25,5 +25,12 @@ def synthetic_metagenome(
         indels_deviation: int = 0
         ) -> None:
     stelaro_rust.synthetic_metagenome(
-        src, genomes, dst, reads, length, length_deviation, indels, indels_deviation
+        src,
+        genomes,
+        dst,
+        reads,
+        length,
+        length_deviation,
+        indels,
+        indels_deviation
     )
