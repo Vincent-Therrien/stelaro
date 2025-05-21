@@ -267,7 +267,7 @@ pub fn sample_synthetic_sequence(
     length_deviation: u32,
     indels: u32,
     indels_deviation: u32,
-) -> Result<String, Error> {
+) -> Result<(String, String), Error> {
     let mut rng = rand::thread_rng();
     let i_length: u32 = match length_deviation {
         0 => length,
@@ -286,7 +286,7 @@ pub fn sample_synthetic_sequence(
         i_length as u64,
         i_indels,
     ) {
-        Ok((read, _offset)) => Ok(read),
+        Ok((read, _offset)) => Ok((read, identifier.to_string())),
         Err(error) => {
             info!(
                 "Failed to generate a read: {} {}",

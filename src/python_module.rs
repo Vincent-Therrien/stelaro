@@ -5,6 +5,7 @@ use crate::transform;
 use ndarray::{Array2, Array3, Axis};
 use numpy::{IntoPyArray, PyArray3};
 use pyo3::prelude::*;
+use pyo3::types::PyList;
 use std::error::Error;
 use std::path::Path;
 
@@ -136,9 +137,11 @@ fn synthetic_sample<'py>(
     indels: u32,
     indels_deviation: u32,
     encoding: String,
-) -> Bound<'py, PyArray3<u8>> {
+) -> (Bound<'py, PyArray3<u8>>, Bound<'py, PyList>) {
     let processed_length = length + length_deviation;
     let mut tensor = Array3::<u8>::zeros((reads as usize, processed_length as usize, 4));
+    let mut identifiers = Vec::new();
+    identifiers.reserve(reads as usize);
     let genomes = Path::new(&genomes);
     let index = Path::new(&index);
     let index = read_index_file(index).unwrap();
@@ -152,7 +155,7 @@ fn synthetic_sample<'py>(
                 indels,
                 indels_deviation,
             ) {
-                Ok(sequence) => {
+                Ok((sequence, identifier)) => {
                     let matrix = encode(
                         encoding.clone(),
                         sequence.as_str(),
@@ -160,13 +163,15 @@ fn synthetic_sample<'py>(
                     )
                     .unwrap();
                     tensor.index_axis_mut(Axis(0), i as usize).assign(&matrix);
+                    identifiers.push(identifier);
                     break;
                 }
                 Err(_error) => (),
             };
         }
     }
-    tensor.into_pyarray(py)
+    let list = PyList::new(py, identifiers).unwrap();
+    (tensor.into_pyarray(py), list)
 }
 /// from stelaro.stelaro import synthetic_sample
 /// synthetic_sample("data/classification_dataset/bacteria.tsv", "data/classification_dataset/", 5, 10, 0, 0, 0, "onehot")
