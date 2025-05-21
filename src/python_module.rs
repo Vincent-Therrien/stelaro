@@ -1,9 +1,11 @@
 use crate::data;
+use crate::data::{read_index_file, sample_synthetic_sequence};
 use crate::io::sequence;
-use ndarray::Array3;
-use numpy::ndarray::{ArrayD, ArrayViewD};
-use numpy::{IntoPyArray, PyArray3, PyArrayDyn, PyReadonlyArrayDyn};
+use crate::transform;
+use ndarray::{Array2, Array3, Axis};
+use numpy::{IntoPyArray, PyArray3};
 use pyo3::prelude::*;
+use std::error::Error;
 use std::path::Path;
 
 #[derive(IntoPyObject)]
@@ -116,6 +118,13 @@ fn synthetic_metagenome(
     }
 }
 
+fn encode(encoding: String, sequence: &str, size: usize) -> Result<Array2<u8>, Box<dyn Error>> {
+    if encoding == "onehot" {
+        return Ok(transform::onehot(sequence, size)?);
+    }
+    Err("Failed encoding the sequence.".into())
+}
+
 #[pyfunction]
 fn synthetic_sample<'py>(
     py: Python<'py>,
@@ -127,12 +136,40 @@ fn synthetic_sample<'py>(
     indels: u32,
     indels_deviation: u32,
     encoding: String,
-) -> Bound<'py, PyArray3<f32>> {
-    let dimension = length + length_deviation;
-    let mut tensor = Array3::<f32>::zeros((reads as usize, dimension as usize, 1));
-    // TODO: fill the tensor
+) -> Bound<'py, PyArray3<u8>> {
+    let processed_length = length + length_deviation;
+    let mut tensor = Array3::<u8>::zeros((reads as usize, processed_length as usize, 4));
+    let genomes = Path::new(&genomes);
+    let index = Path::new(&index);
+    let index = read_index_file(index).unwrap();
+    for i in 0..reads {
+        loop {
+            match sample_synthetic_sequence(
+                &index,
+                genomes,
+                length,
+                length_deviation,
+                indels,
+                indels_deviation,
+            ) {
+                Ok(sequence) => {
+                    let matrix = encode(
+                        encoding.clone(),
+                        sequence.as_str(),
+                        processed_length as usize,
+                    )
+                    .unwrap();
+                    tensor.index_axis_mut(Axis(0), i as usize).assign(&matrix);
+                    break;
+                }
+                Err(_error) => (),
+            };
+        }
+    }
     tensor.into_pyarray(py)
 }
+/// from stelaro.stelaro import synthetic_sample
+/// synthetic_sample("data/classification_dataset/bacteria.tsv", "data/classification_dataset/", 5, 10, 0, 0, 0, "x")
 
 #[pymodule]
 fn stelaro(m: &Bound<'_, PyModule>) -> PyResult<()> {

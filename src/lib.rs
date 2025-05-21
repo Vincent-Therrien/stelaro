@@ -11,6 +11,8 @@ pub mod io {
 
 pub mod data;
 
+pub mod transform;
+
 pub mod utils {
     pub mod progress;
 }

@@ -59,6 +59,8 @@ maturin develop
 
 ## Planned features
 
+- [ ] Sample synthetic metagenomic samples directly into Numpy arrays from an ID
+- [ ] Sample synthetic metagenomic samples directly into Numpy arrays from a taxon
 - [ ] Manipulate phylogenetic trees (GTDB, rustworkx) and matching reference genomes (NCBI).
 - [ ] Transform synthetic datasets into compact formats to train neural networks.
 - [ ] Integrate annotation data (CARD, VFDB, BacMet)

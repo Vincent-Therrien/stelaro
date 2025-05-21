@@ -41,5 +41,3 @@ lazy_static! {
         m
     };
 }
-
-//pub fn transform_sequence(sequence: String) -> Result<Vec<u8>, String> {}

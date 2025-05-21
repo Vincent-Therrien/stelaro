@@ -99,7 +99,7 @@ pub fn install_genomes(index: &Path, dst: &Path, force: bool) -> Result<(), Erro
 /// * `src`: Index file path.
 ///
 /// Returns a tuple containing the genome identifier and genome size.
-fn read_index_file(src: &Path) -> Result<Vec<(String, u64)>, Error> {
+pub fn read_index_file(src: &Path) -> Result<Vec<(String, u64)>, Error> {
     let mut index = Vec::new();
     let file = File::open(src)?;
     let reader = BufReader::new(file);
@@ -259,48 +259,41 @@ pub fn synthetic_metagenome(
     Ok(())
 }
 
-/// Same as `synthetic_metagenome`, but returns an array instead of writing the samples in a file.
-pub fn sample_synthetic_metagenome(
-    index: &Path,
+/// Same as `synthetic_metagenome`, but returns one sequence instead of writing sequences in a file.
+pub fn sample_synthetic_sequence(
+    index: &Vec<(String, u64)>,
     genomes: &Path,
-    reads: u32,
     length: u32,
     length_deviation: u32,
     indels: u32,
     indels_deviation: u32,
-) -> Result<(), Error> {
-    let index = read_index_file(index).unwrap();
+) -> Result<String, Error> {
     let mut rng = rand::thread_rng();
-    let pb = progress::new_bar(reads as u64);
-    for i in 0..reads {
-        let i_length: u32 = match length_deviation {
-            0 => length,
-            _ => rng.gen_range(length - length_deviation..length + length_deviation),
-        };
-        let i_indels: u32 = match indels_deviation {
-            0 => 0,
-            _ => rng.gen_range(indels - indels_deviation..indels + indels_deviation),
-        };
-        let index_row = index.choose(&mut rng).unwrap();
-        let (identifier, genome_size) = index_row;
-        let genome_filepath = genomes.join(Path::new(&identifier));
-        match simulate_sequence(
-            genome_filepath.as_path(),
-            *genome_size,
-            i_length as u64,
-            i_indels,
-        ) {
-            Ok((read, offset)) => {
-                pb.set_position(i as u64);
-            }
-            Err(_error) => {
-                info!(
-                    "Failed to generate a read: {} {}",
-                    genome_filepath.display(),
-                    genome_size
-                );
-            }
-        };
+    let i_length: u32 = match length_deviation {
+        0 => length,
+        _ => rng.gen_range(length - length_deviation..length + length_deviation),
+    };
+    let i_indels: u32 = match indels_deviation {
+        0 => 0,
+        _ => rng.gen_range(indels - indels_deviation..indels + indels_deviation),
+    };
+    let index_row = index.choose(&mut rng).unwrap();
+    let (identifier, genome_size) = index_row;
+    let genome_filepath = genomes.join(Path::new(&identifier));
+    match simulate_sequence(
+        genome_filepath.as_path(),
+        *genome_size,
+        i_length as u64,
+        i_indels,
+    ) {
+        Ok((read, _offset)) => Ok(read),
+        Err(error) => {
+            info!(
+                "Failed to generate a read: {} {}",
+                genome_filepath.display(),
+                genome_size
+            );
+            Err(error)
+        }
     }
-    Ok(())
 }
