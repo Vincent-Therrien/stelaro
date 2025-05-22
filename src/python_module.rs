@@ -2,11 +2,10 @@ use crate::data;
 use crate::data::{read_index_file, sample_synthetic_sequence};
 use crate::io::sequence;
 use crate::transform;
-use ndarray::{Array2, Array3, Axis};
-use numpy::{IntoPyArray, PyArray3};
+use ndarray::{Array3, Axis};
+use numpy::{IntoPyArray, PyArray3, PyArrayMethods};
 use pyo3::prelude::*;
 use pyo3::types::PyList;
-use std::error::Error;
 use std::path::Path;
 
 #[derive(IntoPyObject)]
@@ -119,13 +118,6 @@ fn synthetic_metagenome(
     }
 }
 
-fn encode(encoding: String, sequence: &str, size: usize) -> Result<Array2<u8>, Box<dyn Error>> {
-    if encoding == "onehot" {
-        return Ok(transform::onehot(sequence, size)?);
-    }
-    Err("Failed encoding the sequence.".into())
-}
-
 #[pyfunction]
 fn synthetic_sample<'py>(
     py: Python<'py>,
@@ -139,14 +131,16 @@ fn synthetic_sample<'py>(
     encoding: String,
 ) -> (Bound<'py, PyArray3<u8>>, Bound<'py, PyList>) {
     let processed_length = length + length_deviation;
-    let mut tensor = Array3::<u8>::zeros((reads as usize, processed_length as usize, 4));
+    let dimension = transform::encoding_dimension(&encoding).unwrap();
+    let mut tensor = Array3::<u8>::zeros((reads as usize, processed_length as usize, dimension));
     let mut identifiers = Vec::new();
     identifiers.reserve(reads as usize);
     let genomes = Path::new(&genomes);
     let index = Path::new(&index);
     let index = read_index_file(index).unwrap();
     for i in 0..reads {
-        loop {
+        let n_attempts = 5;
+        for attempt in 1..=n_attempts {
             match sample_synthetic_sequence(
                 &index,
                 genomes,
@@ -156,7 +150,7 @@ fn synthetic_sample<'py>(
                 indels_deviation,
             ) {
                 Ok((sequence, identifier)) => {
-                    let matrix = encode(
+                    let matrix = transform::encode(
                         encoding.clone(),
                         sequence.as_str(),
                         processed_length as usize,
@@ -166,15 +160,41 @@ fn synthetic_sample<'py>(
                     identifiers.push(identifier);
                     break;
                 }
-                Err(_error) => (),
+                Err(_error) => {
+                    if attempt == n_attempts {
+                        identifiers.push(format!("ERROR").to_string());
+                    }
+                }
             };
         }
     }
     let list = PyList::new(py, identifiers).unwrap();
     (tensor.into_pyarray(py), list)
 }
-/// from stelaro.stelaro import synthetic_sample
-/// synthetic_sample("data/classification_dataset/bacteria.tsv", "data/classification_dataset/", 5, 10, 0, 0, 0, "onehot")
+
+#[pyfunction]
+fn decode<'py>(
+    py: Python<'py>,
+    tensor: Bound<'py, PyArray3<u8>>,
+    encoding: String,
+) -> Bound<'py, PyList> {
+    let mut sequences = Vec::new();
+    let size = tensor.len().unwrap();
+    sequences.reserve(size);
+    let tensor: Array3<u8> = tensor.to_owned_array();
+    for i in 0..size {
+        match transform::decode(
+            encoding.clone(),
+            tensor.index_axis(Axis(0), i).to_owned(),
+            size,
+        ) {
+            Ok(sequence) => sequences.push(sequence),
+            Err(_) => sequences.push("ERROR".to_string()),
+        }
+    }
+    let sequences = PyList::new(py, sequences).unwrap();
+    sequences
+}
 
 #[pymodule]
 fn stelaro(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -185,5 +205,6 @@ fn stelaro(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(install_genomes, m)?)?;
     m.add_function(wrap_pyfunction!(synthetic_metagenome, m)?)?;
     m.add_function(wrap_pyfunction!(synthetic_sample, m)?)?;
+    m.add_function(wrap_pyfunction!(decode, m)?)?;
     Ok(())
 }
