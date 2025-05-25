@@ -19,7 +19,7 @@ def test_encoding():
     encodings, identifiers = stelaro_rs.synthetic_sample(
         "../data/test_index.tsv",
         "../data/",
-        reads=10,
+        reads=50,
         length=25,
         length_deviation=0,
         indels=0,

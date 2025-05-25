@@ -25,6 +25,7 @@ pub fn install(origin: String, name: String, dst: &Path, force: bool) -> Result<
         },
         "gtdb" => match name.as_str() {
             "trees" => gtdb::install_trees(dst, force),
+            "taxonomy" => gtdb::install_taxonomy(dst, force),
             _ => panic!("Unsupported name `{}` for source `GTDB`.", name),
         },
         _ => panic!("Unsupported origin `{}`.", origin),
