@@ -51,7 +51,7 @@ class Taxonomy():
     def __init__(
             self,
             databases: tuple[str] = ("refseq", )
-        ):
+            ):
         """Create a GTDB taxonomy manipulation object.
 
         Args:
@@ -71,10 +71,12 @@ class Taxonomy():
         self.genome_counts = {}
 
     def _get_line_identifier(self, line: str) -> str:
+        """Get the genome assembly accession ID from a GTDB taxonomy file."""
         identifier = line.split("\t")[0]
         return identifier[len("RS_"):]  # Remove the GTDB-specific prefix.
 
     def _get_line_taxonomy(self, line: str) -> list[str]:
+        """Get the full taxonomy of a line in a GTDB taxonomy file."""
         line = line.split("\t")[-1]
         fields = line.strip().split(';')
         assert len(fields) == len(Taxonomy.TAXONOMIC_LEVELS), (
@@ -87,6 +89,7 @@ class Taxonomy():
             identifier: str,
             taxonomy: list[str]
             ) -> None:
+        """Add a genome to the current object."""
         index = self.root
         level = 0
         for field in taxonomy:
@@ -109,6 +112,7 @@ class Taxonomy():
         self.genomes[database][identifier] = index
 
     def read_file(self, path: str) -> None:
+        """Read a GTDB taxonomy file and add its content to the object."""
         with open(path, "r") as f:
             for line in f:
                 if line.startswith("RS_"):
@@ -125,7 +129,8 @@ class Taxonomy():
             path: list[str] = [],
             depth: int = float("inf")
             ) -> rx.PyDiGraph:
-        """
+        """Extract a subgraph from the taxonomy.
+
         Returns: Tuple containing (graph, root).
         """
         if not path:
@@ -161,7 +166,8 @@ class Taxonomy():
             nodes += level
         return self.graph.subgraph(nodes), index
 
-    def visualize(self, axis, G = None) -> None:
+    def visualize(self, axis, G=None) -> None:
+        """Visualize the taxonomy graph in a pyplot graph."""
         if G is None:
             G = self.graph
         mpl_draw(
@@ -174,6 +180,7 @@ class Taxonomy():
         )
 
     def _get_n_leaves(self, node: int) -> int:
+        """Obtain the number of leaves that can be accessed from a node."""
         def recurse(n: int):
             count = 0
             edges = self.graph.out_edges(n)
@@ -186,37 +193,70 @@ class Taxonomy():
                 return self.genome_counts[n]
         return recurse(node)
 
-    def _print_line(self, text, depth, level, width) -> str:
-        column_width = width // (depth + 1)
-        if len(text) > column_width - 2:
-            text = text[:column_width - 6] + "..."
-        prefix = "| " + (" " * level * column_width) + text
+    def _get_n_nodes(self, node: int, depth: int) -> int:
+        """Obtain the number of nodes at a certain depth from a node."""
+        def recurse(n: int, d: int):
+            count = 0
+            edges = self.graph.out_edges(n)
+            if d <= 0:
+                return len(edges)
+            if edges:
+                for edge in edges:
+                    _, node_index, _ = edge
+                    count += recurse(node_index, d - 1)
+                return count
+            else:
+                return 1
+        return recurse(node, depth)
+
+    def _print_line(self, node, depth, level, width) -> str:
+        """Print a line in a taxonomy summary table."""
+        column_width = width // depth
+        text = self.graph[node]
+        count = f" ({len(self.graph.out_edges(node))})"
+        if len(text + count) > column_width - 2:
+            text = text[:column_width - 6 - len(count)] + "..."
+        prefix = "| " + (" " * level * column_width) + text + count
         return prefix + " " * (width - len(prefix)) + "|"
 
     def _print_section(self, node: int, depth: int, width: int) -> None:
-        column_width = width // (depth + 1)
+        """Print a section in a taxonomy summary table."""
+        column_width = width // depth
+
         def recurse(n: int, level: int):
-            print(self._print_line(self.graph[n], depth, level, width))
+            print(self._print_line(n, depth, level, width) + "           |")
             for edge in self.graph.out_edges(n):
                 _, node_index, _ = edge
-                if level < depth - 1:
+                if level < depth - 2:
                     recurse(node_index, level + 1)
                 else:
-                    print(self._print_line(self.graph[node_index], depth, level + 1, width), end="")
-                    print(" " + str(self._get_n_leaves(node_index)))
+                    print(
+                        self._print_line(
+                            node_index, depth, level + 1, width
+                        ),
+                        end=""
+                    )
+                    suffix = " " + str(self._get_n_leaves(node_index))
+                    print(
+                        suffix
+                        + " " * (len("| N Genomes |") - len(suffix) - 2)
+                        + "|"
+                    )
+
         recurse(node, 0)
         header = "-" * (column_width - 1) + "+"
-        print("+" + header * (depth + 1))
+        print("+" + header * depth + "-----------+")
 
     def print(
             self,
             path: list[str],
             depth: int = None,
-            width = 120,
+            width: int = 120,
             ) -> None:
+        """Print a table that summarizes the taxonomy."""
         root = self.root
         # Find the top-level node.
-        for field in path:
+        for i, field in enumerate(path):
             edges = self.graph.out_edges(root)
             if edges:
                 for edge in edges:
@@ -224,18 +264,24 @@ class Taxonomy():
                     if self.graph[node_index] == field:
                         root = node_index
                         break
+                else:
+                    rank = Taxonomy.TAXONOMIC_LEVELS[i]
+                    raise RuntimeError(f"`{field}` is not a `{rank}`")
             else:
                 raise RuntimeError(f"Could not find `{path}`.")
         if path:
-            print(f"Taxonomy within the {Taxonomy.TAXONOMIC_LEVELS[len(path) - 1]} {path[-1]}:")
-        taxa = Taxonomy.TAXONOMIC_LEVELS[len(path):len(path) + depth + 1]
+            taxon = Taxonomy.TAXONOMIC_LEVELS[len(path) - 1]
+            print(f"Taxonomy within the {taxon} {path[-1]}:")
+        taxa = Taxonomy.TAXONOMIC_LEVELS[len(path):len(path) + depth]
         width -= len("| N Genomes |")
         column_width = width // len(taxa)
         header = "=" * (column_width - 1) + "+"
         print("+" + header * len(taxa) + "===========+")
         for i, taxon in enumerate(taxa):
-            padding = (column_width - 2) - len(taxon)
-            print("| " + taxon + " " * padding, end="")
+            count = self._get_n_nodes(root, i)
+            text = taxon + f" ({count})"
+            padding = (column_width - 2) - len(text)
+            print("| " + text + " " * padding, end="")
         print("| N Genomes |")
         print("+" + header * len(taxa) + "===========+")
         for edge in self.graph.out_edges(root):
