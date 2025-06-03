@@ -75,9 +75,9 @@ def synthetic_samples(
         reads: int,
         length: int,
         encoding: str,
-        length_deviation: int=0,
-        indels: int=0,
-        indels_deviation: int=0,
+        length_deviation: int = 0,
+        indels: int = 0,
+        indels_deviation: int = 0,
         ) -> np.ndarray:
     """Sample synthetic metagenome samples from reference genomes.
 

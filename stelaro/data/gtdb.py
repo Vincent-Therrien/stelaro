@@ -83,6 +83,12 @@ class Taxonomy():
             f"Unexpected line: {line}")
         return [f[3:] for f in fields]  # Remove the `d__` prefixes.
 
+    def _count_reference_genomes(self) -> int:
+        total = 0
+        for _, n in self.genome_counts.items():
+            total += n
+        return total
+
     def _add_genome(
             self,
             database: str,
@@ -271,7 +277,8 @@ class Taxonomy():
                 raise RuntimeError(f"Could not find `{path}`.")
         if path:
             taxon = Taxonomy.TAXONOMIC_LEVELS[len(path) - 1]
-            print(f"Taxonomy within the {taxon} {path[-1]}:")
+            N = self._get_n_leaves(root)
+            print(f"Taxonomy within the {taxon} {path[-1]} ({N} genomes):")
         taxa = Taxonomy.TAXONOMIC_LEVELS[len(path):len(path) + depth]
         width -= len("| N Genomes |")
         column_width = width // len(taxa)

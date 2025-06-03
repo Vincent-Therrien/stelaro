@@ -5,6 +5,7 @@ use std::error::Error;
 
 mod decoding;
 mod encoding;
+pub mod kmer;
 
 lazy_static! {
     static ref onehot_nt_code: HashMap<char, Array1<u8>> = {
