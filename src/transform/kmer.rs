@@ -1,5 +1,7 @@
 //! Perform operations related to K-mers.
 
+use crate::data::read_index_file;
+use crate::io::sequence;
 use std::collections::HashMap;
 
 fn generate_kmer_map(k: usize) -> HashMap<String, u32> {
@@ -41,4 +43,29 @@ pub fn count(sequence: &str, k: usize) -> HashMap<String, u32> {
         }
     }
     kmer_map
+}
+
+/// Combine K-mer counts stored in two dictionaries.
+pub fn fuse(dictionary: &mut HashMap<String, u32>, d: &HashMap<String, u32>) {
+    for (key, value) in d {
+        let counter = dictionary.entry(key.clone()).or_insert(0);
+        *counter += value;
+    }
+}
+
+/// Split a string into vectors that do not contain `N` characters.`
+fn split_at_n(input: &str) -> Vec<String> {
+    input
+        .split('N')                 // split at each 'N'
+        .filter(|s| !s.is_empty())  // ignore empty segments (e.g. between consecutive Ns)
+        .map(|s| s.to_string())     // convert &str to String
+        .collect()
+}
+
+/// Generate a K-mer profile for a set of reference genomes.
+/// * `genome_directory`: Directory in which the reference genome files are stored.
+/// * `index`: TSV file containing the reference genome IDs.
+/// * `k`: Size of the K-mers.
+pub fn profile(genome_directory: &Path, index: &Path, k: usize) {
+    // TODO
 }
