@@ -5,7 +5,7 @@ use crate::transform;
 use ndarray::{Array3, Axis};
 use numpy::{IntoPyArray, PyArray3, PyArrayMethods};
 use pyo3::prelude::*;
-use pyo3::types::PyList;
+use pyo3::types::{PyDict, PyList};
 use std::path::Path;
 
 #[derive(IntoPyObject)]
@@ -196,6 +196,23 @@ fn decode<'py>(
     sequences
 }
 
+#[pyfunction]
+fn profile_kmer<'py>(
+    py: Python<'py>,
+    index: String,
+    directory: String,
+    k: u32,
+) -> Bound<'py, PyDict> {
+    let index = Path::new(&index);
+    let directory = Path::new(&directory);
+    let map = transform::kmer::profile(directory, index, k.clone() as usize);
+    let dict = PyDict::new(py);
+    for (kmer, count) in map {
+        let _ = dict.set_item(kmer, count);
+    }
+    dict
+}
+
 #[pymodule]
 fn stelaro(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(read_fasta, m)?)?;
@@ -206,5 +223,6 @@ fn stelaro(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(synthetic_metagenome, m)?)?;
     m.add_function(wrap_pyfunction!(synthetic_sample, m)?)?;
     m.add_function(wrap_pyfunction!(decode, m)?)?;
+    m.add_function(wrap_pyfunction!(profile_kmer, m)?)?;
     Ok(())
 }

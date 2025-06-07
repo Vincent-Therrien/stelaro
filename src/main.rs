@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 use std::path::Path;
 
 use stelaro::data;
+use stelaro::transform;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None, arg_required_else_help = true)]
@@ -107,6 +108,21 @@ enum Commands {
         /// Maximum deviation for the number of indels in a synthetic read. Default: 0.
         #[arg(long, required = false)]
         indels_deviation: Option<i32>,
+    },
+
+    /// Obtain the K-mer profile of a set of reference genomes.
+    ProfileKmer {
+        /// Name of the file that contains the URLs of the genomes.
+        #[arg(short, long, required = true)]
+        index: String,
+
+        /// Directory that contains the reference genomes.
+        #[arg(short, long, required = true)]
+        directory: String,
+
+        /// Directory that contains the reference genomes.
+        #[arg(short, long, required = true)]
+        k: u64,
     },
 }
 
@@ -276,6 +292,18 @@ fn main() {
             ) {
                 Ok(_) => (),
                 Err(error) => panic!("Genome installation failed: {}", error),
+            }
+        }
+        Some(Commands::ProfileKmer {
+            index,
+            directory,
+            k,
+        }) => {
+            let index = Path::new(index);
+            let directory = Path::new(directory);
+            let map = transform::kmer::profile(directory, index, k.clone() as usize);
+            for (kmer, count) in map {
+                println!("{}\t{}", kmer, count);
             }
         }
         None => {}

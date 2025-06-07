@@ -118,6 +118,7 @@ pub fn read_fasta_section(path: &Path, i: u64, n: u64) -> io::Result<String> {
     Ok(result.chars().take(n as usize).collect())
 }
 
+/// Count the number of sequences stored in a FASTA file.
 pub fn count_fasta_sequences(path: &Path) -> io::Result<u32> {
     let file = File::open(path)?;
     let reader = BufReader::new(file);
