@@ -1,9 +1,10 @@
-"""Base module
+"""
+    Data transformation module.
 
     - Author: Vincent Therrien (therrien.vincent.2@courrier.uqam.ca)
     - Affiliation: Département d'informatique, UQÀM
-    - File creation date: October 2024
+    - File creation date: June 2025
     - License: MIT
 """
 
-__all__ = ["data", "transform", ]
+__all__ = ["kmers", ]

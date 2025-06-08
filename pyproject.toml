@@ -29,6 +29,7 @@ cargo-extra-args = "--features extension-module"
 packages = [
     "stelaro",
     "stelaro.data",
+    "stelaro.transform",
 ]
 include-package-data = true
 

@@ -9,6 +9,7 @@
 import numpy as np
 import os
 import stelaro.stelaro as stelaro_rs
+from stelaro.transform import kmer
 
 abspath = os.path.abspath(__file__)
 dname = os.path.dirname(abspath)
@@ -47,3 +48,19 @@ def test_kmer_profiling():
             assert expected_count == count, (
                 f"Unexpected count for K-mer {kmer}."
             )
+
+
+def test_extract_n_non_overlapping():
+    profile = {
+        "AAAA": 10,
+        "CAAA": 9,
+        "CCAA": 8,
+        "CCCA": 7,
+        "GGGG": 6,
+        "TTTT": 5
+    }
+    assert kmer.extract(profile, 6) == list(profile.keys())
+    assert kmer.extract(profile, 6, 1) == ["AAAA", "CCAA", "GGGG", "TTTT"]
+    assert kmer.extract(profile, 3, 1) == ["AAAA", "CCAA", "GGGG"]
+    assert kmer.extract(profile, 6, 2) == ["AAAA", "CCCA", "GGGG", "TTTT"]
+    assert kmer.extract(profile, 3, 2) == ["AAAA", "CCCA", "GGGG"]

@@ -11,7 +11,7 @@
 
 import stelaro.stelaro as stelaro_rust
 
-__all__ = ["ncbi", ]
+__all__ = ["ncbi", "gtdb", ]
 
 
 def synthetic_metagenome(
@@ -34,3 +34,15 @@ def synthetic_metagenome(
         indels,
         indels_deviation
     )
+
+
+def get_index_size(index: str) -> int:
+    """Get the size of the genomes stored at an index."""
+    total = 0
+    with open(index, "r") as f:
+        next(f)  # Skip the header.
+        for line in f:
+            fields = line.strip().split("\t")
+            size = int(fields[-1])
+            total += size
+    return total
