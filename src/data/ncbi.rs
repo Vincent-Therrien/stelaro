@@ -2,7 +2,6 @@
 
 use log::info;
 use rand::Rng;
-use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
 use std::io::Error;
@@ -13,7 +12,9 @@ use crate::data::download;
 use crate::utils::progress;
 
 const SERVER_ROOT: &str = "https://ftp.ncbi.nih.gov/";
-const ACCESSION_2_TAXID_PATH: &str = "pub/taxonomy/accession2taxid/";
+const TAXONOMY_PATH: &str = "pub/taxonomy/";
+const TAXONOMY_FILE: &str = "taxdump.tar.gz";
+const TAXONOMY_FILE_UNZIPPED: &str = "taxdump.tar";
 const REFERENCE_GENOME_PATH: &str = "genomes/refseq/";
 const REFERENCE_GENOME_LIST: &'static [&'static str] = &[
     "archaea",
@@ -30,21 +31,6 @@ const MICRO_REFERENCE_GENOME_LIST: &'static [&'static str] =
     &["archaea", "bacteria", "fungi", "protozoa", "viral"];
 const CHECKSUM_SUFFIX: &str = ".md5";
 const FNA_FILE_ENDING: &str = "_genomic.fna.gz";
-
-lazy_static! {
-    static ref NUCL_TAXID_URLS: HashMap<String, String> = {
-        let mut m = HashMap::new();
-        m.insert(
-            String::from("gb"),
-            String::from("nucl_gb.accession2taxid.gz"),
-        );
-        m.insert(
-            String::from("wgs"),
-            String::from("nucl_wgs.accession2taxid.gz"),
-        );
-        m
-    };
-}
 
 fn is_already_downloaded(local_checksum: &Path, remote_checksum: String) -> bool {
     let local = match fs::read_to_string(local_checksum) {
@@ -64,23 +50,24 @@ fn is_already_downloaded(local_checksum: &Path, remote_checksum: String) -> bool
 /// * `force` - If true, download even if the files are already installed.
 pub fn download_taxonomy(path: &Path, force: bool) -> Result<(), Error> {
     fs::create_dir_all(path)?;
-    for (_, filename) in NUCL_TAXID_URLS.iter() {
-        let url = format!("{}{}{}", SERVER_ROOT, ACCESSION_2_TAXID_PATH, filename);
-        let checksum_url = format!("{}{}", url, CHECKSUM_SUFFIX);
-        let local_path = path.join(filename);
-        let local_checksum_path = path.join(format!("{}{}", filename, CHECKSUM_SUFFIX));
-        if force {
-            let _ = download::https(&url, &local_path, true);
-            download::decompress_archive(&local_path);
+    let url = format!("{}{}{}", SERVER_ROOT, TAXONOMY_PATH, TAXONOMY_FILE);
+    let checksum_url = format!("{}{}", url, CHECKSUM_SUFFIX);
+    let local_path = path.join(TAXONOMY_FILE);
+    let local_path_unzipped = path.join(TAXONOMY_FILE_UNZIPPED);
+    let local_checksum_path = path.join(format!("{}{}", TAXONOMY_FILE, CHECKSUM_SUFFIX));
+    if force {
+        let _ = download::https(&url, &local_path, true);
+        download::decompress_archive(&local_path);
+        let _ = download::decompress_tar(&local_path_unzipped, &path);
+    } else {
+        if is_already_downloaded(&local_checksum_path, checksum_url.to_string()) {
+            info!("The file `{}` is already installed.", TAXONOMY_FILE);
         } else {
-            if is_already_downloaded(&local_checksum_path, checksum_url.to_string()) {
-                info!("The file `{}` is already installed.", filename);
-            } else {
-                let _ = download::https(&url, &local_path, true);
-                let _ = download::https(&checksum_url, &local_checksum_path, true);
-            }
-            download::decompress_archive(&local_path);
+            let _ = download::https(&url, &local_path, true);
+            let _ = download::https(&checksum_url, &local_checksum_path, true);
         }
+        download::decompress_archive(&local_path);
+        let _ = download::decompress_tar(&local_path_unzipped, &path);
     }
     info!("The NCBI taxonomy is installed at `{}`.", path.display());
     Ok(())

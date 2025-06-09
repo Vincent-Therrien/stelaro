@@ -38,13 +38,6 @@ mkdir data/ncbi_taxonomy
 stelarilo install --origin ncbi --name taxonomy --dst data/ncbi_taxonomy
 ```
 
-This downloads the following files:
-
-- `nucl_gb.accession2taxid`: a list of identifiers for GenBank (curated list).
-- `nucl_gb.accession2taxid.gz.md5`: checksum for the GenBank file.
-- `nucl_wgs.accession2taxid`: a list of identifiers for Whole Genome Shotgun sequences (less curated list)
-- `nucl_wgs.accession2taxid.gz.md5`: checksum for the Whole Genome Shotgun file.
-
 If you execute the previous command again, the program will notice that the taxonomy is already
 installed and will not download it another time. To download the taxonomy regardless, you can add
 the `--force` option.

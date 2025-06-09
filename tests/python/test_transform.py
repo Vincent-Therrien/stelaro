@@ -64,3 +64,18 @@ def test_extract_n_non_overlapping():
     assert kmer.extract(profile, 3, 1) == ["AAAA", "CCAA", "GGGG"]
     assert kmer.extract(profile, 6, 2) == ["AAAA", "CCCA", "GGGG", "TTTT"]
     assert kmer.extract(profile, 3, 2) == ["AAAA", "CCCA", "GGGG"]
+
+
+def test_compress():
+    sequence = "AAAAGGGGAAAA"
+    scheme = {
+        "A": 0,
+        "C": 1,
+        "G": 2,
+        "T": 3,
+        "AAAA": 4,
+        "AC": 5,
+        "CG": 6
+    }
+    compression = kmer.compress(sequence, scheme)
+    assert compression == [4, 2, 2, 2, 2, 4]

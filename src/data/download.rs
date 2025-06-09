@@ -7,6 +7,7 @@ use std::fs;
 use std::fs::File;
 use std::io::{self, copy, BufReader, Read, Write};
 use std::path::Path;
+use tar::Archive;
 
 use crate::utils::progress;
 
@@ -74,6 +75,17 @@ pub fn decompress_gz(src: &Path, dst: &Path, display_progress: bool) -> io::Resu
     Ok(total_n_bytes)
 }
 
+pub fn decompress_tar(tar_path: &Path, output_dir: &Path) -> io::Result<()> {
+    let file = File::open(tar_path)?;
+    let mut archive = Archive::new(file);
+    archive.unpack(output_dir)?;
+    match fs::remove_file(tar_path) {
+        Ok(_) => info!("Deleted the archive: {}", tar_path.display()),
+        Err(_) => info!("Failed to delete the archive: {}", tar_path.display()),
+    }
+    Ok(())
+}
+
 pub fn decompress_archive(local_path: &Path) {
     let decompressed_name = local_path.with_extension("");
     if !Path::new(&decompressed_name).exists() {
@@ -86,6 +98,6 @@ pub fn decompress_archive(local_path: &Path) {
     }
     match fs::remove_file(local_path) {
         Ok(_) => info!("Deleted the archive: {}", local_path.display()),
-        Err(_) => (),
+        Err(_) => info!("Failed to delete the archive: {}", local_path.display()),
     }
 }

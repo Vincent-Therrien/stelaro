@@ -20,6 +20,15 @@ def install_summaries(path: str, force: bool = False) -> None:
     stelaro_rust.install("ncbi", "genome_summaries", path, force)
 
 
+def install_taxonomy(path: str, force: bool = False) -> None:
+    """Download reference assembly taxonomy.
+
+    Args:
+        path: Directory in which to install data.
+    """
+    stelaro_rust.install("ncbi", "taxonomy", path, force)
+
+
 def summarize_assemblies(path: str) -> None:
     """Visualize reference genome counts.
 

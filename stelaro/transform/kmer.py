@@ -93,3 +93,45 @@ def extract(kmers: dict, n: int, m: int = None) -> list[str]:
             if not overlaps:
                 selected_kmers.append(candidate)
     return selected_kmers
+
+
+def compress(sequence: str, scheme: dict) -> list[int]:
+    """Compress a sequence according to a K-mer scheme.
+
+    Args:
+        sequence: Sequence to compress.
+        scheme: Compression scheme formatted as `{kmer: symbol}`.
+    """
+    keys = list(scheme.keys())
+    lengths = set([len(k) for k in keys])
+    length_bins = [[] for _ in lengths]
+    reversed_lengths = sorted(lengths, reverse=True)
+    for i, length in zip(range(len(length_bins)), reversed_lengths):
+        for k in scheme:
+            if len(k) == length:
+                length_bins[i].append(k)
+    scratchpad = list(sequence)
+    for length_bin in length_bins:
+        window_size = len(length_bin[0])
+        for i in range(0, len(sequence) - window_size + 1):
+            window = scratchpad[i:i + window_size]
+            try:
+                window = "".join(window)
+            except TypeError as _:
+                continue
+            if window in length_bin:
+                scratchpad[i] = scheme[window]
+                for j in range(1, window_size):
+                    scratchpad[i + j] = None
+                i += window_size
+    compression = [s for s in scratchpad if s]
+    return compression
+
+
+def decompress(sequence: list[int], scheme: dict) -> str:
+    """Restore a compressed sequence into the original sequence."""
+    reverse_scheme = {}
+    for k, v in scheme.items():
+        reverse_scheme[v] = k
+    symbols = [reverse_scheme[s] for s in sequence]
+    return "".join(symbols)

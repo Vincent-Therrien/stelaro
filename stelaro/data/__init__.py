@@ -46,3 +46,8 @@ def get_index_size(index: str) -> int:
             size = int(fields[-1])
             total += size
     return total
+
+
+def read_genome(file: str) -> list[str]:
+    """Read a reference genome."""
+    return stelaro_rust.read_fasta(file)["obj"]
