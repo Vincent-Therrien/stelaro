@@ -8,7 +8,15 @@
 
 import os
 import numpy as np
+import rustworkx as rx
 import stelaro.stelaro as stelaro_rust
+
+
+ASSEMBLY_ACCESSION_NUMBER_COLUMN = 0
+ASSEMBLY_TAXID_COLUMN = 5
+TAXONOMY_TAXID_COLUMN = 0
+TAXONOMY_PARENT_TAXID_COLUMN = 2
+TAXONOMY_RANK_COLUMN = 4
 
 
 def install_summaries(path: str, force: bool = False) -> None:
@@ -115,3 +123,62 @@ def synthetic_samples(
         encoding=encoding
     )
     return encodings, identifiers
+
+
+def get_assembly_taxid(
+        file: str, database: list[str] = ["refseq"]
+        ) -> list[tuple[str]]:
+    """Obtain genome IDs and taxid in an NCBI genome summary file.
+
+    Args:
+        file: NCBI genome summary file path.
+        database: NCBI database (refseq and / or genbank).
+
+    Returns: List of (Reference genome ID accession number, taxid) tuples.
+    """
+    pairs = []
+    with open(file, "r") as f:
+        next(f)  # Skip the first line.
+        next(f)  # Skip the header.
+        for line in f:
+            fields = line.strip().split("\t")
+            ID = fields[ASSEMBLY_ACCESSION_NUMBER_COLUMN]
+            taxID = fields[ASSEMBLY_TAXID_COLUMN]
+            pairs.append((ID, taxID))
+
+
+def get_taxonomy_nodes(file: str) -> dict:
+    """Obtain the the NCBI taxonomy nodes.
+
+    Args:
+        file: File path to the `nodes.dmp` file of the NCBI taxonomy,
+
+    Returns: A dict formatted as {taxid: (parent taxid, rank)}
+    """
+    lines = []
+    with open(file, "r") as f:
+        for line in f:
+            fields = line.strip().split("\t")
+            taxid = fields[TAXONOMY_TAXID_COLUMN]
+            parent = fields[TAXONOMY_PARENT_TAXID_COLUMN]
+            rank = fields[TAXONOMY_RANK_COLUMN]
+            lines.append((taxid, parent, rank))
+    return lines
+
+
+def resolve_taxonomy(taxIDs: list[str], taxonomy_nodes: dict) -> rx.DiGraph:
+    """TODO: Convert a list of taxIDs into a taxonomic tree.
+
+    Args:
+        taxIDs: List of NCBI taxonomy identifiers.
+        taxonomy_nodes: Dictionary representing the taxonomy network, as
+            return by the function `stelaro.data.ncbi.get_taxonomy_nodes`.
+
+    Returns: A network representing the taxonomy.
+    """
+    pass
+
+
+def taxid_to_names(file: str, taxIDs: list[str]) -> list[str]:
+    """TODO: Convert taxIDs into names."""
+    pass
