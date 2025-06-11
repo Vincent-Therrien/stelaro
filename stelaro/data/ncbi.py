@@ -172,11 +172,21 @@ def resolve_taxonomy(taxIDs: list[str], taxonomy_nodes: dict) -> rx.DiGraph:
     Args:
         taxIDs: List of NCBI taxonomy identifiers.
         taxonomy_nodes: Dictionary representing the taxonomy network, as
-            return by the function `stelaro.data.ncbi.get_taxonomy_nodes`.
+            returned by the function `stelaro.data.ncbi.get_taxonomy_nodes`.
 
     Returns: A network representing the taxonomy.
     """
-    pass
+    graph = rx.PyDiGraph()
+    taxid_to_index = {}
+    for taxID in taxIDs:
+        if taxID not in taxid_to_index:
+            taxid_to_index[taxID] = graph.add_node(taxID)
+            parent = taxonomy_nodes[taxID][0]
+            if parent not in taxid_to_index:
+                taxid_to_index[parent] = graph.add_node(parent)
+            graph.add_edge(parent, taxid_to_index[taxID], 1)
+    #TODO: Resolve the root
+    return graph
 
 
 def taxid_to_names(file: str, taxIDs: list[str]) -> list[str]:
