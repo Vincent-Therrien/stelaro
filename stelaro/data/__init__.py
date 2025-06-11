@@ -9,10 +9,12 @@
     - License: MIT
 """
 
+from random import sample, shuffle
 import rustworkx as rx
 import matplotlib.axes as plt
 from matplotlib.axes._axes import Axes
 from rustworkx.visualization import mpl_draw
+
 import stelaro.stelaro as stelaro_rust
 
 __all__ = ["ncbi", "gtdb", ]
@@ -171,15 +173,7 @@ class Taxonomy():
                     taxonomy = self._get_GTDB_line_taxonomy(line)
                     self._add_genome(database, identifier, taxonomy)
 
-    def extract(
-            self,
-            path: list[str] = [],
-            depth: int = float("inf")
-            ) -> rx.PyDiGraph:
-        """Extract a subgraph from the taxonomy.
-
-        Returns: Tuple containing (graph, root).
-        """
+    def find_node(self, path: list[str] = [], ) -> int:
         if not path:
             return self.graph
         index = self.root
@@ -194,6 +188,18 @@ class Taxonomy():
                         break
             else:
                 raise RuntimeError(f"Could not find `{path}`.")
+        return index
+
+    def extract(
+            self,
+            path: list[str] = [],
+            depth: int = float("inf")
+            ) -> rx.PyDiGraph:
+        """Extract a subgraph from the taxonomy.
+
+        Returns: Tuple containing (graph, root).
+        """
+        index = self.find_node(path)
         # Extract the subgraph.
         levels = [[index], ]
         while True:
@@ -254,6 +260,28 @@ class Taxonomy():
             else:
                 return 1
         return recurse(node, depth)
+
+    def get_leaves(self, node: int) -> list[int]:
+        """Obtain the number of nodes at a certain depth from a node."""
+        nodes = []
+        def recurse(n: int):
+            edges = self.graph.out_edges(n)
+            if edges:
+                for edge in edges:
+                    _, next_index, _ = edge
+                    recurse(next_index)
+            else:
+                return nodes.append(n)
+        recurse(node)
+        return nodes
+
+    def get_genome_identifiers(self, nodes: list[int]) -> list[str]:
+        references = []
+        for database in self.genomes:
+            for node in nodes:
+                if node in self.genomes[database]:
+                    references += self.genomes[database][node]
+        return references
 
     def _print_line(self, node, depth, level, width) -> str:
         """Print a line in a taxonomy summary table."""
@@ -336,12 +364,13 @@ class Taxonomy():
             self._print_section(node_index, depth, width)
 
 
-def extract_genomes(
+def bin_genomes(
         taxonomy: Taxonomy,
         path: tuple[str] = None,
         depth: int = 1,
         n_minimum: int = 0,
-        n_maximum: int = float("inf")
+        n_maximum: int = float("inf"),
+        verbosity: int = 1
         ) -> dict:
     """Extract collections of reference genomes at particular taxonomic orders.
 
@@ -358,7 +387,7 @@ def extract_genomes(
             is `2`, this function will return a dictionary that contains the
             three orders in that phylum, nested in their respective class.
         n_minimum: Inclusive minimum number of reference genomes. Taxa with
-            fewer reference genomes are not retained.
+            fewer reference genomes are pruned.
         n_maximum: Inclusive maximum number of reference genomes. If there are
             more reference genomes than that in the taxa, a subset is randomly
             sampled.
@@ -366,33 +395,48 @@ def extract_genomes(
     Returns: A dictionary that maps taxonomic levels to lists of reference
         genomes.
     """
-    # Find the top-level node.
-    index = taxonomy.root
-    if path:
-        for field in path:
-            edges = taxonomy.out_edges(index)
-            if edges:
-                for edge in edges:
-                    _, node_index, _ = edge
-                    if taxonomy[node_index] == field:
-                        index = node_index
-                        break
-            else:
-                raise RuntimeError(f"Could not find `{path}`.")
-    # Extract the subgraph.
-    genomes = {}
-    while True:
-        nodes = []
-        for node in levels[-1]:
-            edges = self.graph.out_edges(node)
-            for edge in edges:
-                _, new_node, _ = edge
-                nodes.append(new_node)
-        if not nodes:
-            break  # Reached the lowest taxonomic level.
-        levels.append(nodes)
-        if len(levels) > depth:
-            break  # Reached the maximum depth.
+    n_total, n_pruned, n_capped, n_selected = 0, 0, 0, 0
+
+    def recurse(node: int, rank: int):
+        nonlocal n_total, n_pruned, n_capped, n_selected
+        label = taxonomy.graph[node]
+        # Recursion end condition: the depth is reached, fetch the leaves.
+        if rank > depth:
+            nodes = taxonomy.get_leaves(node)
+            reference_genomes = taxonomy.get_genome_identifiers(nodes)
+            n = len(reference_genomes)
+            n_total += n
+            if n < n_minimum:
+                if verbosity > 1:
+                    print(f"Taxon {label} contains {n} genomes. Dropping.")
+                n_pruned += len(reference_genomes)
+                reference_genomes = []
+            elif n > n_maximum:
+                if verbosity > 1:
+                    print(f"Taxon {label} contains {n} genomes. "
+                        + f" Selecting {n_maximum} genomes.")
+                n_capped += n - n_maximum
+                reference_genomes = sample(reference_genomes, n_maximum)
+            n_selected += len(reference_genomes)
+            return reference_genomes
+        # Recursion
+        taxa = {}
+        edges = taxonomy.graph.out_edges(node)
+        for edge in edges:
+            _, node2, _ = edge
+            taxa[taxonomy.graph[node2]] = recurse(node2, rank + 1)
+            if not taxa[taxonomy.graph[node2]]:
+                del taxa[taxonomy.graph[node2]]
+        return taxa
+
+    index = taxonomy.find_node(path)
+    genomes = recurse(index, 0)
+    if verbosity:
+        print(f"Detected {n_total} reference genomes.")
+        print(f"Pruned {n_pruned} reference genomes from low frequency taxa.")
+        print(f"Removed {n_capped} reference genomes from large taxa.")
+        print(f"Selected {n_selected} reference genomes.")
+    return genomes
 
 
 def non_similar_sets(
@@ -411,4 +455,80 @@ def non_similar_sets(
 
     Raises: RuntimeError if there are not enough genomes.
     """
-    pass
+    assert sum(proportions) == 1.0, "Proportions must sum to one."
+
+    def recurse(sub_dict: dict) -> dict:
+        result = {}
+        for key, value in sub_dict.items():
+            if type(value) == list:
+                n = len(value)
+                indices = [round(p * n) for p in proportions]
+                elements = value.copy()
+                shuffle(elements)
+                bins = []
+                start = 0
+                for i, index in enumerate(indices):
+                    bins.append(elements[start:start + index])
+                    start += index
+                result[key] = bins
+            else:
+                result[key] = recurse(value)
+        return result
+
+    def recurse_prune(sub_dict: dict, index: int):
+        """Remove all lists except the `index` one."""
+        result = {}
+        for key, value in sub_dict.items():
+            if type(value) == list:
+                result[key] = value[index]  # Select on list.
+            else:
+                result[key] = recurse_prune(value, index)
+        return result
+
+    split = recurse(taxa)
+    bins = []
+    for i in range(len(proportions)):
+        bins.append(recurse_prune(split.copy(), i))
+
+    return bins
+
+
+class TaxonomyVector():
+    """Represent a dictionary of taxa in a flat vector.
+
+    Attributes:
+        taxonomies: A dictionary that maps an index to a taxonomic path.
+        identifier: A dictionary that maps an index to an NCBI identifier.
+    """
+
+    def __init__(self, taxa: dict):
+        self.taxonomies = {}
+        self.identifiers = {}
+        count = 0
+
+        def recurse(sub_dict: dict, path: list[str] = []):
+            nonlocal count
+            for key, value in sub_dict.items():
+                new_path = path + [key]
+                if type(value) == list:
+                    for identifier in value:
+                        n = len(self.taxonomies)
+                        self.taxonomies[n] = new_path
+                        self.identifiers[n] = identifier
+                else:
+                    recurse(value, new_path)
+
+        recurse(taxa)
+        self.depth = len(self.taxonomies[0])
+
+    def get_distance(self, A: int, B: int) -> int:
+        distance = 0
+        for a, b in zip(
+                sorted(self.taxonomies[A], reverse=True),
+                sorted(self.taxonomies[B], reverse=True),
+                ):
+            if a == b:
+                break
+            else:
+                distance += 1
+        return distance
