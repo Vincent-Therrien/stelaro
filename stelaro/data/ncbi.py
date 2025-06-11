@@ -166,7 +166,7 @@ def get_taxonomy_nodes(file: str) -> dict:
     return lines
 
 
-def resolve_taxonomy(taxIDs: list[str], taxonomy_nodes: dict) -> rx.DiGraph:
+def resolve_taxonomy(taxIDs: list[str], taxonomy_nodes: dict) -> rx.PyDiGraph:
     """TODO: Convert a list of taxIDs into a taxonomic tree.
 
     Args:
@@ -185,7 +185,7 @@ def resolve_taxonomy(taxIDs: list[str], taxonomy_nodes: dict) -> rx.DiGraph:
             if parent not in taxid_to_index:
                 taxid_to_index[parent] = graph.add_node(parent)
             graph.add_edge(parent, taxid_to_index[taxID], 1)
-    #TODO: Resolve the root
+    # TODO: Resolve the root
     return graph
 
 
