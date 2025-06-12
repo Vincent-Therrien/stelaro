@@ -175,7 +175,7 @@ class Taxonomy():
 
     def find_node(self, path: list[str] = [], ) -> int:
         if not path:
-            return self.graph
+            return self.root
         index = self.root
         # Find the top-level node.
         for field in path:
@@ -264,6 +264,7 @@ class Taxonomy():
     def get_leaves(self, node: int) -> list[int]:
         """Obtain the number of nodes at a certain depth from a node."""
         nodes = []
+
         def recurse(n: int):
             edges = self.graph.out_edges(n)
             if edges:
@@ -272,15 +273,33 @@ class Taxonomy():
                     recurse(next_index)
             else:
                 return nodes.append(n)
+
         recurse(node)
         return nodes
+
+    def resolve_taxonomy(self, node: int) -> list[str]:
+        """Determine the taxonomy from a node index."""
+        index = node
+        path = [self.graph[node]]
+        while True:
+            edges = self.graph.in_edges(index)
+            if edges:
+                parent, _, _ = edges[0]
+                path.append(self.graph[parent])
+                index = parent
+            else:
+                path = list(reversed(path))
+                path = path[1:]  # Remove the root.
+                return path
 
     def get_genome_identifiers(self, nodes: list[int]) -> list[str]:
         references = []
         for database in self.genomes:
             for node in nodes:
                 if node in self.genomes[database]:
-                    references += self.genomes[database][node]
+                    identifiers = self.genomes[database][node]
+                    path = self.resolve_taxonomy(node)
+                    references.append((identifiers, path))
         return references
 
     def _print_line(self, node, depth, level, width) -> str:
@@ -388,36 +407,43 @@ def bin_genomes(
             three orders in that phylum, nested in their respective class.
         n_minimum: Inclusive minimum number of reference genomes. Taxa with
             fewer reference genomes are pruned.
-        n_maximum: Inclusive maximum number of reference genomes. If there are
-            more reference genomes than that in the taxa, a subset is randomly
-            sampled.
+        n_maximum: Inclusive maximum number of reference genomes in a single
+            species.
 
     Returns: A dictionary that maps taxonomic levels to lists of reference
         genomes.
     """
-    n_total, n_pruned, n_capped, n_selected = 0, 0, 0, 0
+    n_total, n_pruned, n_capped, n_selected, n_species = 0, 0, 0, 0, 0
 
     def recurse(node: int, rank: int):
-        nonlocal n_total, n_pruned, n_capped, n_selected
+        nonlocal n_total, n_pruned, n_capped, n_selected, n_species
         label = taxonomy.graph[node]
         # Recursion end condition: the depth is reached, fetch the leaves.
         if rank > depth:
             nodes = taxonomy.get_leaves(node)
-            reference_genomes = taxonomy.get_genome_identifiers(nodes)
-            n = len(reference_genomes)
+            raw_reference_genomes = taxonomy.get_genome_identifiers(nodes)
+            n = sum([len(r[0]) for r in raw_reference_genomes])
             n_total += n
             if n < n_minimum:
                 if verbosity > 1:
                     print(f"Taxon {label} contains {n} genomes. Dropping.")
-                n_pruned += len(reference_genomes)
-                reference_genomes = []
-            elif n > n_maximum:
-                if verbosity > 1:
-                    print(f"Taxon {label} contains {n} genomes. "
-                        + f" Selecting {n_maximum} genomes.")
-                n_capped += n - n_maximum
-                reference_genomes = sample(reference_genomes, n_maximum)
-            n_selected += len(reference_genomes)
+                n_pruned += n
+                return []
+            reference_genomes = []
+            for references, path in raw_reference_genomes:
+                if len(references) > n_maximum:
+                    if verbosity > 1:
+                        print(f"Species {path} contains {n} genomes. "
+                              + f" Selecting {n_maximum} genomes.")
+                    n_capped += len(references) - n_maximum
+                    reference_genomes.append(
+                        (sample(references, n_maximum), path)
+                    )
+                    print(path, len(references), len(reference_genomes[-1][0]))
+                else:
+                    reference_genomes.append((references, path))
+            n_species += len(reference_genomes)
+            n_selected += sum([len(r[0]) for r in reference_genomes])
             return reference_genomes
         # Recursion
         taxa = {}
@@ -430,18 +456,37 @@ def bin_genomes(
         return taxa
 
     index = taxonomy.find_node(path)
-    genomes = recurse(index, 0)
+    genomes = recurse(index, 1)
     if verbosity:
         print(f"Detected {n_total} reference genomes.")
+        print(f"Detected {n_species} species.")
         print(f"Pruned {n_pruned} reference genomes from low frequency taxa.")
         print(f"Removed {n_capped} reference genomes from large taxa.")
         print(f"Selected {n_selected} reference genomes.")
     return genomes
 
 
+def group_by_depth(taxonomies: list, depth: int) -> list:
+    """Transforms a list of (references, (taxonomy)) into a list of
+    identifiers belonging to distinct taxa, as defined by the depth.
+    """
+    bins = {}
+    for reference_genomes, taxon in taxonomies:
+        key = tuple(taxon[:-depth])
+        if key in bins:
+            bins[key] += reference_genomes
+        else:
+            bins[key] = reference_genomes
+    groups = []
+    for _, v in bins.items():
+        groups.append(v)
+    return groups
+
+
 def non_similar_sets(
         taxa: dict,
-        proportions: tuple[float]
+        proportions: tuple[float],
+        depth: int = 1
         ) -> tuple[dict]:
     """Split an extracted reference genome dictionary into non-overlapping sets
     of reference genomes.
@@ -449,6 +494,8 @@ def non_similar_sets(
     Args:
         taxa: Collection of reference genomes produced by `extract_genomes`.
         proportions: Approximate proportion of genomes in each set.
+        depth: Taxonomic rank at which to consider reference genomes distinct.
+            If `1`, species of separate genus will be considered different.
 
     Returns: Tuple of divided taxa. Each element of the tuple contain different
         reference genomes.
@@ -460,15 +507,18 @@ def non_similar_sets(
     def recurse(sub_dict: dict) -> dict:
         result = {}
         for key, value in sub_dict.items():
-            if type(value) == list:
-                n = len(value)
+            if type(value) is list:
+                elements = group_by_depth(value, depth).copy()
+                n = len(elements)
                 indices = [round(p * n) for p in proportions]
-                elements = value.copy()
                 shuffle(elements)
                 bins = []
                 start = 0
                 for i, index in enumerate(indices):
-                    bins.append(elements[start:start + index])
+                    current_bin = []
+                    for b in elements[start:start + index]:
+                        current_bin += b
+                    bins.append(current_bin)
                     start += index
                 result[key] = bins
             else:
@@ -479,7 +529,7 @@ def non_similar_sets(
         """Remove all lists except the `index` one."""
         result = {}
         for key, value in sub_dict.items():
-            if type(value) == list:
+            if type(value) is list:
                 result[key] = value[index]  # Select on list.
             else:
                 result[key] = recurse_prune(value, index)
@@ -494,38 +544,31 @@ def non_similar_sets(
 
 
 class TaxonomyVector():
-    """Represent a dictionary of taxa in a flat vector.
+    """Represent taxa in a flat vector.
 
     Attributes:
-        taxonomies: A dictionary that maps an index to a taxonomic path.
-        identifier: A dictionary that maps an index to an NCBI identifier.
+        reference_genomes: A list containing (taxonomy, identifiers) tuples.
     """
 
     def __init__(self, taxa: dict):
-        self.taxonomies = {}
-        self.identifiers = {}
-        count = 0
+        self.reference_genomes = []
 
         def recurse(sub_dict: dict, path: list[str] = []):
-            nonlocal count
             for key, value in sub_dict.items():
                 new_path = path + [key]
-                if type(value) == list:
-                    for identifier in value:
-                        n = len(self.taxonomies)
-                        self.taxonomies[n] = new_path
-                        self.identifiers[n] = identifier
+                if type(value) is list:
+                    self.reference_genomes.append([tuple(new_path), value])
                 else:
                     recurse(value, new_path)
 
         recurse(taxa)
-        self.depth = len(self.taxonomies[0])
+        self.depth = len(self.reference_genomes[0][0])
 
     def get_distance(self, A: int, B: int) -> int:
         distance = 0
         for a, b in zip(
-                sorted(self.taxonomies[A], reverse=True),
-                sorted(self.taxonomies[B], reverse=True),
+                sorted(self.reference_genomes[A][0], reverse=True),
+                sorted(self.reference_genomes[B][0], reverse=True),
                 ):
             if a == b:
                 break
