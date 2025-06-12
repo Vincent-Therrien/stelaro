@@ -389,7 +389,8 @@ def bin_genomes(
         depth: int = 1,
         n_minimum: int = 0,
         n_maximum: int = float("inf"),
-        verbosity: int = 1
+        n_min_genus: int = 0,
+        verbosity: int = 1,
         ) -> dict:
     """Extract collections of reference genomes at particular taxonomic orders.
 
@@ -409,6 +410,7 @@ def bin_genomes(
             fewer reference genomes are pruned.
         n_maximum: Inclusive maximum number of reference genomes in a single
             species.
+        n_min_genus: Minimum number of genus per taxon.
 
     Returns: A dictionary that maps taxonomic levels to lists of reference
         genomes.
@@ -439,9 +441,15 @@ def bin_genomes(
                     reference_genomes.append(
                         (sample(references, n_maximum), path)
                     )
-                    print(path, len(references), len(reference_genomes[-1][0]))
                 else:
                     reference_genomes.append((references, path))
+            if n_min_genus:
+                n_genus = set([tuple(t[1][:-1]) for t in reference_genomes])
+                if len(n_genus) < n_min_genus:
+                    if verbosity > 1:
+                        print(f"Taxon {label} contains {n_genus} genus. Dropping.")
+                    n_pruned += n
+                    return []
             n_species += len(reference_genomes)
             n_selected += sum([len(r[0]) for r in reference_genomes])
             return reference_genomes
@@ -451,7 +459,7 @@ def bin_genomes(
         for edge in edges:
             _, node2, _ = edge
             taxa[taxonomy.graph[node2]] = recurse(node2, rank + 1)
-            if not taxa[taxonomy.graph[node2]]:
+            if not len(taxa[taxonomy.graph[node2]]):
                 del taxa[taxonomy.graph[node2]]
         return taxa
 
@@ -530,7 +538,7 @@ def non_similar_sets(
         result = {}
         for key, value in sub_dict.items():
             if type(value) is list:
-                result[key] = value[index]  # Select on list.
+                result[key] = value[index]
             else:
                 result[key] = recurse_prune(value, index)
         return result
@@ -557,7 +565,9 @@ class TaxonomyVector():
             for key, value in sub_dict.items():
                 new_path = path + [key]
                 if type(value) is list:
-                    self.reference_genomes.append([tuple(new_path), value])
+                    elements = value.copy()
+                    shuffle(elements)
+                    self.reference_genomes.append([tuple(new_path), elements])
                 else:
                     recurse(value, new_path)
 
@@ -575,3 +585,15 @@ class TaxonomyVector():
             else:
                 distance += 1
         return distance
+
+    def clip_size(self, N: int):
+        """Reduce the size of each row."""
+        for i in range(len(self.reference_genomes)):
+            if len(self.reference_genomes[i][1]) > N:
+                self.reference_genomes[i][1] = self.reference_genomes[i][1][:N]
+
+    def get_n_genomes(self) -> int:
+        total = 0
+        for i in range(len(self.reference_genomes)):
+            total += len(self.reference_genomes[i][1])
+        return total
