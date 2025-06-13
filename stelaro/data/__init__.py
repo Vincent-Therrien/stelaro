@@ -133,7 +133,7 @@ class Taxonomy():
             self,
             database: str,
             identifier: str,
-            taxonomy: list[str]
+            taxonomy: list[str],
             ) -> None:
         """Add a genome to the current object."""
         index = self.root
@@ -160,7 +160,7 @@ class Taxonomy():
         else:
             self.genomes[database][index] = [identifier]
 
-    def read_GTDB_file(self, path: str) -> None:
+    def read_GTDB_file(self, path: str, valid_genomes: list[str]) -> None:
         """Read a GTDB taxonomy file and add its content to the object."""
         with open(path, "r") as f:
             for line in f:
@@ -170,8 +170,9 @@ class Taxonomy():
                     database = "genbank"
                 if database in self.databases:
                     identifier = self._get_GTDB_line_identifier(line)
-                    taxonomy = self._get_GTDB_line_taxonomy(line)
-                    self._add_genome(database, identifier, taxonomy)
+                    if identifier in valid_genomes:
+                        taxonomy = self._get_GTDB_line_taxonomy(line)
+                        self._add_genome(database, identifier, taxonomy)
 
     def find_node(self, path: list[str] = [], ) -> int:
         if not path:
@@ -522,21 +523,71 @@ class Taxonomy():
         return capped_bins
 
 
-def group_by_depth(taxonomies: list, depth: int) -> list:
-    """Transforms a list of (references, (taxonomy)) into a list of
-    identifiers belonging to distinct taxa, as defined by the depth.
+def get_urls(
+        summary_dir: str,
+        summaries: list[str] = ["bacteria", "archaea", "viral"]
+        ) -> None:
+    """Get the set of installable reference genomes."""
+    URL_COLUMN = 19
+    SIZE_COLUMN = 25
+    identifier_to_url = {}
+    for summary in summaries:
+        filepath = f"{summary_dir}{summary}.txt"
+        with open(filepath, "r", encoding='utf-8') as f:
+            next(f)  # Skip the comment.
+            next(f)  # Skip the header.
+            for line in f:
+                fields = line.split("\t")
+                ID = fields[0]
+                url = fields[URL_COLUMN]
+                url += "/" + url.split("/")[-1] + "_genomic.fna.gz"
+                size = fields[SIZE_COLUMN]
+                identifier_to_url[ID] = (url, size)
+    return identifier_to_url
+
+
+def make_index_file(
+        reference_genomes: list,
+        dst: str,
+        summary_dir: str,
+        summaries: list[str] = ["bacteria", "archaea", "viral", "fungi"]
+        ) -> None:
+    """Write an index file to download genomes.
+
+    Args:
+        reference_genomes: Collection of reference genomes returned by
+            Taxonomy.bin_genomes.
+        dst: File path of the output.
+        summary_dir: Directory that contains NCBI genome summaries.
+        summaries: Genome summaries to use.
     """
-    bins = {}
-    for reference_genomes, taxon in taxonomies:
-        key = tuple(taxon[:-depth])
-        if key in bins:
-            bins[key] += reference_genomes
-        else:
-            bins[key] = reference_genomes
-    groups = []
-    for _, v in bins.items():
-        groups.append(v)
-    return groups
+    assert summary_dir.endswith("/"), "Must be a directory."
+    URL_COLUMN = 19
+    SIZE_COLUMN = 25
+    genome_urls = {}
+    for taxon in reference_genomes:
+        for bin_ in taxon[1]:
+            for identifier in bin_[1]:
+                genome_urls[identifier] = ""
+    with open(dst, "w") as output:
+        output.write("ID\tURL\tcategory\tgenome_size\n")
+        for summary in summaries:
+            filepath = f"{summary_dir}{summary}.txt"
+            with open(filepath, "r", encoding='utf-8') as f:
+                next(f)  # Skip the comment.
+                next(f)  # Skip the header.
+                for line in f:
+                    fields = line.split("\t")
+                    ID = fields[0]
+                    if ID in genome_urls:
+                        url = fields[URL_COLUMN]
+                        url += "/" + url.split("/")[-1] + "_genomic.fna.gz"
+                        size = fields[SIZE_COLUMN]
+                        output.write(f"{ID}.fna\t{url}\t{summary}\t{size}\n")
+                        del genome_urls[ID]
+            if len(genome_urls) == 0:
+                break
+    assert len(genome_urls) == 0, "Could not find some URLs."
 
 
 def non_similar_sets(
