@@ -78,7 +78,7 @@ class Taxonomy():
             species node) to the number of reference genomes in that species.
     """
     DATABASES = ("refseq", "genbank")
-    TAXONOMIC_LEVELS = (
+    RANKS = (
         "domain",
         "phylum",
         "class",
@@ -118,7 +118,7 @@ class Taxonomy():
         """Get the full taxonomy of a line in a GTDB taxonomy file."""
         line = line.split("\t")[-1]
         fields = line.strip().split(';')
-        assert len(fields) == len(Taxonomy.TAXONOMIC_LEVELS), (
+        assert len(fields) == len(Taxonomy.RANKS), (
             f"Unexpected line: {line}")
         return [f[3:] for f in fields]  # Remove the `d__` prefixes.
 
@@ -293,13 +293,12 @@ class Taxonomy():
                 return path
 
     def get_genome_identifiers(self, nodes: list[int]) -> list[str]:
+        """Get the reference genome identifiers for species nodes."""
         references = []
         for database in self.genomes:
             for node in nodes:
                 if node in self.genomes[database]:
-                    identifiers = self.genomes[database][node]
-                    path = self.resolve_taxonomy(node)
-                    references.append((identifiers, path))
+                    references.append(self.genomes[database][node])
         return references
 
     def _print_line(self, node, depth, level, width) -> str:
@@ -358,15 +357,15 @@ class Taxonomy():
                         root = node_index
                         break
                 else:
-                    rank = Taxonomy.TAXONOMIC_LEVELS[i]
+                    rank = Taxonomy.RANKS[i]
                     raise RuntimeError(f"`{field}` is not a `{rank}`")
             else:
                 raise RuntimeError(f"Could not find `{path}`.")
         if path:
-            taxon = Taxonomy.TAXONOMIC_LEVELS[len(path) - 1]
+            taxon = Taxonomy.RANKS[len(path) - 1]
             N = self._get_n_leaves(root)
             print(f"Taxonomy within the {taxon} {path[-1]} ({N:_} genomes):")
-        taxa = Taxonomy.TAXONOMIC_LEVELS[len(path):len(path) + depth]
+        taxa = Taxonomy.RANKS[len(path):len(path) + depth]
         width -= len("| N Genomes |")
         column_width = width // len(taxa)
         header = "=" * (column_width - 1) + "+"
@@ -382,96 +381,145 @@ class Taxonomy():
             _, node_index, _ = edge
             self._print_section(node_index, depth, width)
 
+    def get_bins(self, node: int, depth: int):
+        """Returns (taxonomy path, leaf nodes) tuples."""
+        bins = []
 
-def bin_genomes(
-        taxonomy: Taxonomy,
-        path: tuple[str] = None,
-        depth: int = 1,
-        n_minimum: int = 0,
-        n_maximum: int = float("inf"),
-        n_min_genus: int = 0,
-        verbosity: int = 1,
-        ) -> dict:
-    """Extract collections of reference genomes at particular taxonomic orders.
+        def recurse(path: str, node: int):
+            nonlocal bins
+            if len(path) + 1 > depth:
+                leaves = self.get_leaves(node)
+                bins.append((path, leaves))
+            else:
+                edges = self.graph.out_edges(node)
+                for edge in edges:
+                    _, child, _ = edge
+                    recurse(path + [self.graph[child]], child)
 
-    Args:
-        taxonomy: A Taxonomy object representing the dataset.
-        path: Taxonomic path in which to extract reference genomes. For
-            instance, `("Bacteria", "Nitrospirota", )` will select the
-            reference genomes from the Nitrospirota phylum only. If `None`,
-            starts at the root (i.e. above domain rank).
-        depth: Number of taxonomic levels that will be binned. For instance,
-            if the `path` is `("Bacteria", "Nitrospirota", )` and the value
-            of `depth` is `1`, this function will return a dictionary that
-            contains the two classes of the Nitrospirota phylum. If the depth
-            is `2`, this function will return a dictionary that contains the
-            three orders in that phylum, nested in their respective class.
-        n_minimum: Inclusive minimum number of reference genomes. Taxa with
-            fewer reference genomes are pruned.
-        n_maximum: Inclusive maximum number of reference genomes in a single
-            species.
-        n_min_genus: Minimum number of genus per taxon.
+        recurse([], node)
+        return bins
 
-    Returns: A dictionary that maps taxonomic levels to lists of reference
-        genomes.
-    """
-    n_total, n_pruned, n_capped, n_selected, n_species = 0, 0, 0, 0, 0
+    def bin_genomes(
+            self,
+            depth: int,
+            granularity_level: int,
+            min_granularity: int = 1,
+            n_min_reference_genomes_per_bin: int = 0,
+            n_max_reference_genomes_per_species: int = float('inf'),
+            max_bin_size: int = float("inf"),
+            n_max_bins: int = float("inf")
+            ) -> dict:
+        """Extract collections of reference genomes at particular taxonomic
+        orders.
 
-    def recurse(node: int, rank: int):
-        nonlocal n_total, n_pruned, n_capped, n_selected, n_species
-        label = taxonomy.graph[node]
-        # Recursion end condition: the depth is reached, fetch the leaves.
-        if rank > depth:
-            nodes = taxonomy.get_leaves(node)
-            raw_reference_genomes = taxonomy.get_genome_identifiers(nodes)
-            n = sum([len(r[0]) for r in raw_reference_genomes])
-            n_total += n
-            if n < n_minimum:
-                if verbosity > 1:
-                    print(f"Taxon {label} contains {n} genomes. Dropping.")
-                n_pruned += n
-                return []
-            reference_genomes = []
-            for references, path in raw_reference_genomes:
-                if len(references) > n_maximum:
-                    if verbosity > 1:
-                        print(f"Species {path} contains {n} genomes. "
-                              + f" Selecting {n_maximum} genomes.")
-                    n_capped += len(references) - n_maximum
-                    reference_genomes.append(
-                        (sample(references, n_maximum), path)
-                    )
-                else:
-                    reference_genomes.append((references, path))
-            if n_min_genus:
-                n_genus = set([tuple(t[1][:-1]) for t in reference_genomes])
-                if len(n_genus) < n_min_genus:
-                    if verbosity > 1:
-                        print(f"Taxon {label} contains {n_genus} genus. Dropping.")
-                    n_pruned += n
-                    return []
-            n_species += len(reference_genomes)
-            n_selected += sum([len(r[0]) for r in reference_genomes])
-            return reference_genomes
-        # Recursion
-        taxa = {}
-        edges = taxonomy.graph.out_edges(node)
-        for edge in edges:
-            _, node2, _ = edge
-            taxa[taxonomy.graph[node2]] = recurse(node2, rank + 1)
-            if not len(taxa[taxonomy.graph[node2]]):
-                del taxa[taxonomy.graph[node2]]
-        return taxa
+        Args:
+            depth: Number of taxonomic levels that will be kept distinct. If
+                `1`, the genomes will be binned by domain. If `2,` they will
+                be binned by domain and phyla.
+            granularity_level: The number of taxonomic rank to consider genomes
+                unknown. If `0`, the reference genomes will be binned by
+                species. If `1`, the reference genomes will be binned by genus.
+            min_granularity: Minimum number of bins. For instance, if
+                `granularity_level` is `1`, the bins comprising less than 1
+                genus will be pruned.
+            n_min_reference_genomes_per_bin: Minimum number of reference
+                genomes in a bin. Smaller bins are pruned.
+            n_max_reference_genomes_per_species: Maximum number of reference
+                genomes in a single species to bin at most.
+            max_bin_size: Maximum number of reference genomes in a bin.
+            n_max_bins: Maximum number of bins.
 
-    index = taxonomy.find_node(path)
-    genomes = recurse(index, 1)
-    if verbosity:
+        Returns: A dictionary that maps taxonomic levels to bins of reference
+            genomes.
+        """
+        bins = []
+        n_total, n_pruned, n_capped, n_selected = 0, 0, 0, 0
+        n_taxa, n_eliminated_taxa = 0, 0
+        granularity_label = Taxonomy.RANKS[-1 - granularity_level]
+
+        def recurse(path: list[str], node: int):
+            nonlocal bins, n_total, n_pruned, n_capped, n_selected
+            nonlocal n_taxa, n_eliminated_taxa
+            if len(path) > depth:  # End
+                n_taxa += 1
+                min_rank = len(Taxonomy.RANKS) - depth - granularity_level
+                bin_ = self.get_bins(node, min_rank)
+                reference_genomes = []
+                bin_names = []
+                n_genomes = 0
+                for b in bin_:
+                    bin_names.append(b[0][-1])
+                    nodes = b[1]
+                    species = self.get_genome_identifiers(nodes)
+                    n_genomes += sum([len(s) for s in species])
+                    reference_genomes.append(species)
+                n_total += n_genomes
+                # Eliminate small bins.
+                if len(bin_) < min_granularity:
+                    n_pruned += n_genomes
+                    n_eliminated_taxa += 1
+                    print(f"Taxon {path} not retained; {len(bin_)}"
+                          + f" {granularity_label} in {self.databases}.")
+                    return
+                # Eliminate bins that contain too few genomes.
+                if n_genomes < n_min_reference_genomes_per_bin:
+                    n_pruned += n_genomes
+                    n_eliminated_taxa += 1
+                    print(f"Taxon {path} not retained ({n_genomes} genomes).")
+                    return
+                # Remove references when there are too many in one species.
+                capped_reference_genomes = []
+                for bin_ in reference_genomes:
+                    new_bin = []
+                    for species in bin_:
+                        m = len(species)
+                        s = n_max_reference_genomes_per_species  # alias
+                        if m > s:
+                            n_capped += m - s
+                            elements = species.copy()
+                            shuffle(elements)
+                            new_bin += elements[:s]
+                        else:
+                            new_bin += species
+                    n_selected += len(new_bin)
+                    capped_reference_genomes.append(new_bin)
+                zipped_bin = [
+                    (a, b) for a, b in
+                    zip(bin_names, capped_reference_genomes)
+                ]
+                bins.append((path[1:], zipped_bin))
+                return
+            edges = self.graph.out_edges(node)
+            for edge in edges:
+                _, child, _ = edge
+                recurse(path + [self.graph[child]], child)
+
+        recurse(["root"], self.root)
+        print(f"Found {n_taxa} taxa, retained {n_taxa - n_eliminated_taxa}.")
         print(f"Detected {n_total} reference genomes.")
-        print(f"Detected {n_species} species.")
         print(f"Pruned {n_pruned} reference genomes from low frequency taxa.")
-        print(f"Removed {n_capped} reference genomes from large taxa.")
+        print(f"Removed {n_capped} reference genomes from large species.")
         print(f"Selected {n_selected} reference genomes.")
-    return genomes
+        capped_bins = []
+        n_final = 0
+        for path, bin_ in bins:
+            # Eliminate large numbers of bins (e.g. remove genus).
+            elements = bin_.copy()
+            if len(bin_) > n_max_bins:
+                shuffle(elements)
+                elements = elements[:n_max_bins]
+            # Eliminate large numbers of reference genomes (e.g. in genus).
+            capped_elements = []
+            for bin_name, reference_genomes in elements:
+                capped_references = reference_genomes.copy()
+                if len(reference_genomes) > max_bin_size:
+                    shuffle(capped_references)
+                    capped_references = capped_references[:max_bin_size]
+                capped_elements.append((bin_name, capped_references))
+                n_final += len(capped_references)
+            capped_bins.append((path, capped_elements))
+        print(f"Filtered {n_final} reference genomes.")
+        return capped_bins
 
 
 def group_by_depth(taxonomies: list, depth: int) -> list:
