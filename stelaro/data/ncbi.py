@@ -125,48 +125,91 @@ def synthetic_samples(
     return encodings, identifiers
 
 
-def get_assembly_taxid(
-        file: str, database: list[str] = ["refseq"]
-        ) -> list[tuple[str]]:
-    """Obtain genome IDs and taxid in an NCBI genome summary file.
+def get_reference_genome_taxid(file: str) -> set[str]:
+    """Obtain the taxonomy identifiers in an NCBI genome summary file.
 
     Args:
         file: NCBI genome summary file path.
-        database: NCBI database (refseq and / or genbank).
 
-    Returns: List of (Reference genome ID accession number, taxid) tuples.
+    Returns: Set of taxonomy identifiers.
     """
-    pairs = []
+    taxIDs = set()
     with open(file, "r") as f:
         next(f)  # Skip the first line.
         next(f)  # Skip the header.
         for line in f:
             fields = line.strip().split("\t")
             ID = fields[ASSEMBLY_ACCESSION_NUMBER_COLUMN]
+            taxIDs
             taxID = fields[ASSEMBLY_TAXID_COLUMN]
             pairs.append((ID, taxID))
+    return pairs
 
 
-def get_taxonomy_nodes(file: str) -> dict:
+def get_assembly_taxid(file: str) -> set[str]:
+    """Obtain the taxonomy identifiers in an NCBI genome summary file.
+
+    Args:
+        file: NCBI genome summary file path.
+
+    Returns: Set of taxonomy identifiers.
+    """
+    taxIDs = set()
+    with open(file, "r") as f:
+        next(f)  # Skip the first line.
+        next(f)  # Skip the header.
+        for line in f:
+            fields = line.strip().split("\t")
+            taxID = fields[ASSEMBLY_TAXID_COLUMN]
+            taxIDs.add(taxID)
+    return taxIDs
+
+
+def _get_taxonomy_parents(lines: list[str], tax_ids: set[str]) -> list:
     """Obtain the the NCBI taxonomy nodes.
 
     Args:
-        file: File path to the `nodes.dmp` file of the NCBI taxonomy,
+        lines: Content of the `nodes.dmp` file of the NCBI taxonomy.
+        tax_ids: Set of taxonomy IDs to retain.
 
-    Returns: A dict formatted as {taxid: (parent taxid, rank)}
+    Returns: A list of tuples formatted as (taxid, parent_taxid, rank).
     """
+    result = []
+    for line in lines:
+        fields = line.strip().split("\t")
+        taxid = fields[TAXONOMY_TAXID_COLUMN]
+        if taxid not in tax_ids:
+            continue
+        parent = fields[TAXONOMY_PARENT_TAXID_COLUMN]
+        rank = fields[TAXONOMY_RANK_COLUMN]
+        result.append((taxid, parent, rank))
+    return result
+
+
+def get_all_taxonomy_parents(file: str, tax_ids: set[str]) -> list:
+    """Recursively fetch all parents in the NCBI taxonomy.
+
+    Args:
+        file: File path to the `nodes.dmp` file of the NCBI taxonomy,
+        tax_ids: Set of taxonomy IDs to retain.
+    """
+    hierarchy = []
+    subset = tax_ids
     lines = []
     with open(file, "r") as f:
         for line in f:
-            fields = line.strip().split("\t")
-            taxid = fields[TAXONOMY_TAXID_COLUMN]
-            parent = fields[TAXONOMY_PARENT_TAXID_COLUMN]
-            rank = fields[TAXONOMY_RANK_COLUMN]
-            lines.append((taxid, parent, rank))
-    return lines
+            lines.append(line)
+    while True:
+        result = _get_taxonomy_parents(lines, subset)
+        if len(result) <= 1:
+            break
+        hierarchy.append(result)
+        subset = set([p[1] for p in result])
+        print(f"Looking for taxonomic parents: {len(subset)}")
+    return hierarchy
 
 
-def resolve_taxonomy(taxIDs: list[str], taxonomy_nodes: dict) -> rx.PyDiGraph:
+def resolve_taxonomy(taxIDs: set[str], taxonomy_nodes: dict) -> rx.PyDiGraph:
     """TODO: Convert a list of taxIDs into a taxonomic tree.
 
     Args:
