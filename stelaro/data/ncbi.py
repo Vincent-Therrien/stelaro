@@ -9,11 +9,12 @@
 import os
 import numpy as np
 import rustworkx as rx
+from rustworkx.visualization import mpl_draw
 import stelaro.stelaro as stelaro_rust
 
 
 ASSEMBLY_ACCESSION_NUMBER_COLUMN = 0
-ASSEMBLY_TAXID_COLUMN = 5
+ASSEMBLY_TAXID_COLUMN = 6
 TAXONOMY_TAXID_COLUMN = 0
 TAXONOMY_PARENT_TAXID_COLUMN = 2
 TAXONOMY_RANK_COLUMN = 4
@@ -142,12 +143,16 @@ def get_reference_genome_taxid(file: str) -> set[str]:
             ID = fields[ASSEMBLY_ACCESSION_NUMBER_COLUMN]
             taxIDs
             taxID = fields[ASSEMBLY_TAXID_COLUMN]
-            pairs.append((ID, taxID))
-    return pairs
+            taxIDs.append((ID, taxID))
+    return taxIDs
 
 
 def get_assembly_taxid(file: str) -> set[str]:
     """Obtain the taxonomy identifiers in an NCBI genome summary file.
+
+    There can be multiple reference genomes for one taxon, so the number of
+    elements returned by this function is inferior to the number of reference
+    genomes.
 
     Args:
         file: NCBI genome summary file path.
@@ -165,12 +170,17 @@ def get_assembly_taxid(file: str) -> set[str]:
     return taxIDs
 
 
-def _get_taxonomy_parents(lines: list[str], tax_ids: set[str]) -> list:
+def _get_taxonomy_parents(
+        lines: list[str],
+        tax_ids: set[str],
+        levels: list[str] = None
+        ) -> list:
     """Obtain the the NCBI taxonomy nodes.
 
     Args:
         lines: Content of the `nodes.dmp` file of the NCBI taxonomy.
         tax_ids: Set of taxonomy IDs to retain.
+        level: An optional name to restrict the taxa to a specific rank.
 
     Returns: A list of tuples formatted as (taxid, parent_taxid, rank).
     """
@@ -180,58 +190,171 @@ def _get_taxonomy_parents(lines: list[str], tax_ids: set[str]) -> list:
         taxid = fields[TAXONOMY_TAXID_COLUMN]
         if taxid not in tax_ids:
             continue
-        parent = fields[TAXONOMY_PARENT_TAXID_COLUMN]
+        if levels and rank not in levels:
+            continue
         rank = fields[TAXONOMY_RANK_COLUMN]
+        parent = fields[TAXONOMY_PARENT_TAXID_COLUMN]
         result.append((taxid, parent, rank))
     return result
 
 
-def get_all_taxonomy_parents(file: str, tax_ids: set[str]) -> list:
+def get_all_taxonomy_parents(file: str, tax_ids: set[str]) -> tuple:
     """Recursively fetch all parents in the NCBI taxonomy.
 
     Args:
         file: File path to the `nodes.dmp` file of the NCBI taxonomy,
         tax_ids: Set of taxonomy IDs to retain.
+
+    Return: A tuple of dict: (parent to children, tax_id to rank)
     """
-    hierarchy = []
-    subset = tax_ids
     lines = []
     with open(file, "r") as f:
         for line in f:
             lines.append(line)
+    species = _get_taxonomy_parents(lines, tax_ids)
+    subset = set([p[1] for p in species])
+    parents = {}
+    ranks = {}
     while True:
         result = _get_taxonomy_parents(lines, subset)
         if len(result) <= 1:
             break
-        hierarchy.append(result)
         subset = set([p[1] for p in result])
         print(f"Looking for taxonomic parents: {len(subset)}")
-    return hierarchy
+        for r in result:
+            child, parent, rank = r[0], r[1], r[2]
+            ranks[child] = rank
+            if parent not in parents:
+                parents[parent] = set()
+            parents[parent].add(child)
+    return parents, ranks
 
 
-def resolve_taxonomy(taxIDs: set[str], taxonomy_nodes: dict) -> rx.PyDiGraph:
-    """TODO: Convert a list of taxIDs into a taxonomic tree.
+def resolve_taxonomy(
+        parents: list[tuple],
+        ranks: dict,
+        ) -> tuple[rx.PyDiGraph, dict]:
+    """Convert a list of taxIDs into a taxonomic tree.
 
     Args:
-        taxIDs: List of NCBI taxonomy identifiers.
-        taxonomy_nodes: Dictionary representing the taxonomy network, as
-            returned by the function `stelaro.data.ncbi.get_taxonomy_nodes`.
+        taxonomy_nodes: Dict returned by `get_all_taxonomy_parents`.
 
-    Returns: A network representing the taxonomy.
+    Returns: A network representing the taxonomy and a dictionary that maps
+        taxonomic IDs to node indices.
     """
     graph = rx.PyDiGraph()
     taxid_to_index = {}
-    for taxID in taxIDs:
-        if taxID not in taxid_to_index:
-            taxid_to_index[taxID] = graph.add_node(taxID)
-            parent = taxonomy_nodes[taxID][0]
-            if parent not in taxid_to_index:
-                taxid_to_index[parent] = graph.add_node(parent)
-            graph.add_edge(parent, taxid_to_index[taxID], 1)
-    # TODO: Resolve the root
-    return graph
+    n = 0
+    for parent, children in parents.items():
+        for child in children:
+            if parent in taxid_to_index:
+                if child in taxid_to_index:
+                    graph.add_edge(
+                        taxid_to_index[parent],
+                        taxid_to_index[child],
+                        1
+                    )
+                else:
+                    label = (child, ranks[child])
+                    taxid_to_index[child] = graph.add_child(
+                        taxid_to_index[parent],
+                        label,
+                        1
+                    )
+            elif child in taxid_to_index:
+                label = (parent, ranks[parent])
+                taxid_to_index[parent] = graph.add_parent(
+                    taxid_to_index[child],
+                    label,
+                    1
+                )
+            else:
+                label = (parent, ranks[parent])
+                taxid_to_index[parent] = graph.add_node(label)
+                label = (child, ranks[child])
+                taxid_to_index[child] = graph.add_child(
+                    taxid_to_index[parent],
+                    label,
+                    1
+                )
+            n += 1
+    return graph, taxid_to_index
+
+
+def collapse_taxonomy(
+        graph: rx.PyDiGraph,
+        taxid_to_index: dict,
+        levels: tuple[str] = (
+            "root",
+            "acellular root",
+            "domain",
+            "realm",
+            "phylum",
+            "kingdom",
+            "class",
+            "order",
+            "family",
+            "genus",
+            "species",
+        )
+    ) -> None:
+    """Collapse an NCBI taxonomy.
+
+    Args:
+        graph: Graph returned by `resolve_taxonomy`.
+        taxid_to_index: Dictionary returned by `resolve_taxonomy`.
+        levels: Name of the levels to retain in the collapsed taxonomy.
+    """
+    species = []
+    for tax_id, node in taxid_to_index.items():
+        if graph[node][1] == "species":
+            species.append(tax_id)
+
+    def find_lineage(node: int) -> list[str]:
+        lineage = [graph[node]]
+        while True:
+            edges = graph.in_edges(node)
+            if len(edges) == 1:
+                parent, child, _ = edges[0]
+                if parent == child:
+                    break
+                lineage.append(graph[parent])
+                node = parent
+            elif len(edges) == 0:
+                break
+            else:
+                raise RuntimeError("Unexpected number of parents.")
+        return [e for e in lineage if e in levels]
+
+    lineages = [find_lineage(taxid_to_index[s]) for s in species]
+    return lineages
 
 
 def taxid_to_names(file: str, taxIDs: list[str]) -> list[str]:
     """TODO: Convert taxIDs into names."""
     pass
+
+
+def visualize_taxonomy(graph, root, depth) -> None:
+    G = rx.PyDiGraph()
+    G_nodes = {root: G.add_node(graph[root])}
+
+    def recurse(node: int, i: int):
+        if i > depth:
+            return
+        edges = graph.out_edges(node)
+        if edges:
+            for edge in edges:
+                _, next_node, _ = edge
+                G_nodes[next_node] = G.add_child(G_nodes[node], graph[next_node], 1)
+                recurse(next_node, i + 1)
+
+    recurse(root, 0)
+    mpl_draw(
+        G,
+        with_labels=True,
+        labels=str,
+        edge_labels=str,
+        node_color=(1.0, 1.0, 1.0),
+        node_size=500
+    )
