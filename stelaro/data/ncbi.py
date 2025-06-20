@@ -14,10 +14,13 @@ import stelaro.stelaro as stelaro_rust
 
 
 ASSEMBLY_ACCESSION_NUMBER_COLUMN = 0
-ASSEMBLY_TAXID_COLUMN = 6
+ASSEMBLY_TAXID_COLUMN = 5
 TAXONOMY_TAXID_COLUMN = 0
 TAXONOMY_PARENT_TAXID_COLUMN = 2
 TAXONOMY_RANK_COLUMN = 4
+NAMES_TAXID_COLUMN = 0
+NAME_COLUMN = 2
+NAME_TYPE_COLUMN = 6
 
 
 def install_summaries(path: str, force: bool = False) -> None:
@@ -159,14 +162,17 @@ def get_assembly_taxid(file: str) -> set[str]:
 
     Returns: Set of taxonomy identifiers.
     """
-    taxIDs = set()
+    taxIDs = {}
     with open(file, "r") as f:
         next(f)  # Skip the first line.
         next(f)  # Skip the header.
         for line in f:
             fields = line.strip().split("\t")
             taxID = fields[ASSEMBLY_TAXID_COLUMN]
-            taxIDs.add(taxID)
+            reference_genome = fields[ASSEMBLY_ACCESSION_NUMBER_COLUMN]
+            if taxID not in taxIDs:
+                taxIDs[taxID] = []
+            taxIDs[taxID].append(reference_genome)
     return taxIDs
 
 
@@ -285,8 +291,6 @@ def collapse_taxonomy(
         graph: rx.PyDiGraph,
         taxid_to_index: dict,
         levels: tuple[str] = (
-            "root",
-            "acellular root",
             "domain",
             "realm",
             "phylum",
@@ -296,14 +300,17 @@ def collapse_taxonomy(
             "family",
             "genus",
             "species",
+            "no rank",
         )
-    ) -> None:
+    ) -> list[tuple]:
     """Collapse an NCBI taxonomy.
 
     Args:
         graph: Graph returned by `resolve_taxonomy`.
         taxid_to_index: Dictionary returned by `resolve_taxonomy`.
         levels: Name of the levels to retain in the collapsed taxonomy.
+
+    Returns: A list of the taxonomy of each species.
     """
     species = []
     for tax_id, node in taxid_to_index.items():
@@ -324,15 +331,57 @@ def collapse_taxonomy(
                 break
             else:
                 raise RuntimeError("Unexpected number of parents.")
-        return [e for e in lineage if e in levels]
+        lineage = reversed(lineage)
+        return [e for e in lineage if e[1] in levels]
 
     lineages = [find_lineage(taxid_to_index[s]) for s in species]
     return lineages
 
 
-def taxid_to_names(file: str, taxIDs: list[str]) -> list[str]:
-    """TODO: Convert taxIDs into names."""
-    pass
+def taxid_to_names(file: str, tax_ids: set[str]) -> dict:
+    """Convert taxIDs into names.
+
+    Args:
+        file: Path of the `names.dmp` file.
+        tax_ids: NCBI taxonomic identifiers to link to a name.
+
+    Returns: A dictionary that maps a taxonomy identifier to a name.
+    """
+    names = {}
+    tax_ids = tax_ids.copy()
+    with open(file, "r") as f:
+        for line in f:
+            fields = line.strip().split("\t")
+            tax_id = fields[NAMES_TAXID_COLUMN]
+            name = fields[NAME_COLUMN]
+            name_type = fields[NAME_TYPE_COLUMN]
+            if tax_id in tax_ids and name_type == "scientific name":
+                names[tax_id] = name
+                tax_ids.remove(tax_id)
+    return names
+
+
+def split_non_similar_genomes(
+        lineages: list[tuple],
+        depth: int,
+        granularity_level: int,
+        names: dict,
+        tax_to_genome: dict,
+        ) -> list:
+    datasets = {}
+    for lineage in lineages:
+        key = [e for e in lineage[:depth]]
+        key = tuple([names[k[0]] for k in key])
+        granular_level = [e for e in lineage[-granularity_level:]]
+        granular_level = tuple([names[g[0]] for g in granular_level])
+        if key not in datasets:
+            datasets[key] = {}
+        if granular_level not in datasets[key]:
+            datasets[key][granular_level] = []
+        species = lineage[-1][0]
+        print(species, tax_to_genome[species])
+        datasets[key][granular_level] += tax_to_genome[species]
+    return datasets
 
 
 def visualize_taxonomy(graph, root, depth) -> None:
