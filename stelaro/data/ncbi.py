@@ -7,6 +7,7 @@
 """
 
 import os
+from random import shuffle
 import numpy as np
 import rustworkx as rx
 from rustworkx.visualization import mpl_draw
@@ -333,18 +334,32 @@ def split_non_similar_genomes(
         depth: tuple[str],
         granularity_level: str,
         tax_to_genome: dict,
+        max_bin_size: int,
+        n_max_bins: int,
         ) -> list:
+    """Split a set of reference genomes into bins.
+
+    Args:
+        lineages: List of taxonomic lineages.
+        depth: Name of the taxonomic level at which to bin the genomes.
+            E.g. `("acellular root", "realm")` will group by virus realms.
+        granularity_level: Name of the taxonomic level at which to split the
+            genomes. E.g. `genus` will group by genus.
+        tax_to_genome: Dictionary that maps taxonomic IDs to reference genomes.
+        max_bin_size: Maximum number of elements in each granularity level.
+        n_max_bins: Maximum number of bins.
+    """
     datasets = {}
     n_initial = len(lineages)
     n = 0
     for lineage in lineages:
         key = find_depth(lineage, depth)
         if len(key) != len(depth):
-            print(f"Incomplete lineage: {lineage}")
+            # print(f"Incomplete lineage: {lineage}")
             continue
         granularity = find_granularity(lineage, granularity_level)
         if len(granularity) != 1:
-            print(f"Cannot find granularity: {lineage}")
+            # print(f"Cannot find granularity: {lineage}")
             continue
         if key not in datasets:
             datasets[key] = {}
@@ -353,13 +368,27 @@ def split_non_similar_genomes(
         taxon = lineage[-1][0]
         datasets[key][granularity] += tax_to_genome[taxon]
         n += 1
-    clean_dataset = []
-    for key, value in datasets.items():
-        v = []
-        for granularity, reference_genomes in value.items():
-            v.append([granularity, reference_genomes])
-        clean_dataset.append([key, v])
     print(f"Out of {n_initial} reconstructed taxonomies, retained {n}.")
+    clean_dataset = []
+    n_retained = 0
+    for key, value in datasets.items():
+        clean_value = []
+        for granularity, reference_genomes in value.items():
+            if max_bin_size and len(reference_genomes) > max_bin_size:
+                references = reference_genomes.copy()
+                shuffle(references)
+                cropped_genomes = reference_genomes[:max_bin_size]
+                clean_value.append([granularity, cropped_genomes])
+            else:
+                clean_value.append([granularity, reference_genomes])
+        if len(clean_value) > n_max_bins:
+            print(f"`{key}` contains {len(clean_value)} values, reducing.")
+            shuffle(clean_value)
+            clean_value = clean_value[:n_max_bins]
+        for v in clean_value:
+            n_retained += len(v[1])
+        clean_dataset.append([key, clean_value])
+    print(f"Retained {n_retained} reference genomes to balance the dataset.")
     return clean_dataset
 
 
