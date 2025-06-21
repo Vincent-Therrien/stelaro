@@ -213,32 +213,44 @@ def get_all_taxonomy_parents(file: str, tax_ids: set[str]) -> tuple:
 
     Return: A tuple of dict: (parent to children, tax_id to rank)
     """
-    lines = []
+    id_to_parent = {}
+    id_to_rank = {}
     with open(file, "r") as f:
         for line in f:
-            lines.append(line)
-    species = _get_taxonomy_parents(lines, tax_ids)
-    subset = set([p[1] for p in species])
+            fields = line.strip().split("\t")
+            taxid = fields[TAXONOMY_TAXID_COLUMN]
+            rank = fields[TAXONOMY_RANK_COLUMN]
+            parent = fields[TAXONOMY_PARENT_TAXID_COLUMN]
+            id_to_parent[taxid] = parent
+            id_to_rank[taxid] = rank
+    return id_to_parent, id_to_rank
+    subset = tax_ids
     parents = {}
     ranks = {}
     while True:
-        result = _get_taxonomy_parents(lines, subset)
-        if len(result) <= 1:
-            break
-        subset = set([p[1] for p in result])
         print(f"Looking for taxonomic parents: {len(subset)}")
-        for r in result:
-            child, parent, rank = r[0], r[1], r[2]
+        current_subset = subset.copy()
+        subset = set()
+        for child in current_subset:
+            if child not in id_to_parent:
+                print(f"Reference genome with tax ID {child} has to taxonomy.")
+                continue
+            parent, rank = id_to_parent[child], id_to_rank[child]
             ranks[child] = rank
+            subset.add(parent)
             if parent not in parents:
                 parents[parent] = set()
             parents[parent].add(child)
+        if len(subset) == 1:
+            break
     return parents, ranks
 
 
 def resolve_taxonomy(
         parents: list[tuple],
         ranks: dict,
+        tax_ids: set[str],
+        names: dict,
         ) -> tuple[rx.PyDiGraph, dict]:
     """Convert a list of taxIDs into a taxonomic tree.
 
@@ -248,93 +260,30 @@ def resolve_taxonomy(
     Returns: A network representing the taxonomy and a dictionary that maps
         taxonomic IDs to node indices.
     """
-    graph = rx.PyDiGraph()
-    taxid_to_index = {}
-    n = 0
-    for parent, children in parents.items():
-        for child in children:
-            if parent in taxid_to_index:
-                if child in taxid_to_index:
-                    graph.add_edge(
-                        taxid_to_index[parent],
-                        taxid_to_index[child],
-                        1
-                    )
-                else:
-                    label = (child, ranks[child])
-                    taxid_to_index[child] = graph.add_child(
-                        taxid_to_index[parent],
-                        label,
-                        1
-                    )
-            elif child in taxid_to_index:
-                label = (parent, ranks[parent])
-                taxid_to_index[parent] = graph.add_parent(
-                    taxid_to_index[child],
-                    label,
-                    1
-                )
-            else:
-                label = (parent, ranks[parent])
-                taxid_to_index[parent] = graph.add_node(label)
-                label = (child, ranks[child])
-                taxid_to_index[child] = graph.add_child(
-                    taxid_to_index[parent],
-                    label,
-                    1
-                )
-            n += 1
-    return graph, taxid_to_index
-
-
-def collapse_taxonomy(
-        graph: rx.PyDiGraph,
-        taxid_to_index: dict,
-        levels: tuple[str] = (
-            "domain",
-            "realm",
-            "phylum",
-            "kingdom",
-            "class",
-            "order",
-            "family",
-            "genus",
-            "species",
-            "no rank",
-        )
-    ) -> list[tuple]:
-    """Collapse an NCBI taxonomy.
-
-    Args:
-        graph: Graph returned by `resolve_taxonomy`.
-        taxid_to_index: Dictionary returned by `resolve_taxonomy`.
-        levels: Name of the levels to retain in the collapsed taxonomy.
-
-    Returns: A list of the taxonomy of each species.
-    """
-    species = []
-    for tax_id, node in taxid_to_index.items():
-        if graph[node][1] == "species":
-            species.append(tax_id)
-
-    def find_lineage(node: int) -> list[str]:
-        lineage = [graph[node]]
+    lineages = []
+    for taxon in tax_ids:
+        lineage = []
+        index = taxon
+        if taxon not in parents:
+            print(f"Taxon {taxon} has no known lineage.")
+            continue
         while True:
-            edges = graph.in_edges(node)
-            if len(edges) == 1:
-                parent, child, _ = edges[0]
-                if parent == child:
-                    break
-                lineage.append(graph[parent])
-                node = parent
-            elif len(edges) == 0:
-                break
+            if index not in names:
+                print(f"Taxon {index} is nameless.")
+                name = "Undefined"
             else:
-                raise RuntimeError("Unexpected number of parents.")
-        lineage = reversed(lineage)
-        return [e for e in lineage if e[1] in levels]
-
-    lineages = [find_lineage(taxid_to_index[s]) for s in species]
+                name = names[index]
+            if index not in ranks:
+                print(f"Taxon {index} is rankless.")
+                rank = "Undefined"
+            else:
+                rank = ranks[index]
+            lineage.append((taxon, name, rank))
+            if index == parents[index]:
+                break
+            index = parents[index]
+        lineage = [e for e in reversed(lineage)]
+        lineages.append(lineage)
     return lineages
 
 
@@ -361,27 +310,57 @@ def taxid_to_names(file: str, tax_ids: set[str]) -> dict:
     return names
 
 
+def find_depth(lineage, depth: tuple[str]) -> tuple[str]:
+    result = []
+    for _, name, rank in lineage:
+        if rank == depth[len(result)]:
+            result.append(name)
+        if len(result) == len(depth):
+            break
+    return tuple(result)
+
+
+def find_granularity(lineage, granularity: str) -> tuple[str]:
+    result = []
+    for _, name, rank in lineage:
+        if rank == granularity:
+            result.append(name)
+    return tuple(result)
+
+
 def split_non_similar_genomes(
         lineages: list[tuple],
-        depth: int,
-        granularity_level: int,
-        names: dict,
+        depth: tuple[str],
+        granularity_level: str,
         tax_to_genome: dict,
         ) -> list:
     datasets = {}
+    n_initial = len(lineages)
+    n = 0
     for lineage in lineages:
-        key = [e for e in lineage[:depth]]
-        key = tuple([names[k[0]] for k in key])
-        granular_level = [e for e in lineage[-granularity_level:]]
-        granular_level = tuple([names[g[0]] for g in granular_level])
+        key = find_depth(lineage, depth)
+        if len(key) != len(depth):
+            print(f"Incomplete lineage: {lineage}")
+            continue
+        granularity = find_granularity(lineage, granularity_level)
+        if len(granularity) != 1:
+            print(f"Cannot find granularity: {lineage}")
+            continue
         if key not in datasets:
             datasets[key] = {}
-        if granular_level not in datasets[key]:
-            datasets[key][granular_level] = []
-        species = lineage[-1][0]
-        print(species, tax_to_genome[species])
-        datasets[key][granular_level] += tax_to_genome[species]
-    return datasets
+        if granularity not in datasets[key]:
+            datasets[key][granularity] = []
+        taxon = lineage[-1][0]
+        datasets[key][granularity] += tax_to_genome[taxon]
+        n += 1
+    clean_dataset = []
+    for key, value in datasets.items():
+        v = []
+        for granularity, reference_genomes in value.items():
+            v.append([granularity, reference_genomes])
+        clean_dataset.append([key, v])
+    print(f"Out of {n_initial} reconstructed taxonomies, retained {n}.")
+    return clean_dataset
 
 
 def visualize_taxonomy(graph, root, depth) -> None:
