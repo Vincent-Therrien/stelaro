@@ -335,6 +335,7 @@ def split_non_similar_genomes(
         granularity_level: str,
         tax_to_genome: dict,
         max_bin_size: int,
+        n_min_bins: int,
         n_max_bins: int,
         ) -> list:
     """Split a set of reference genomes into bins.
@@ -346,6 +347,7 @@ def split_non_similar_genomes(
         granularity_level: Name of the taxonomic level at which to split the
             genomes. E.g. `genus` will group by genus.
         tax_to_genome: Dictionary that maps taxonomic IDs to reference genomes.
+        n_min_bins: Minimum number of elements in each granularity level.
         max_bin_size: Maximum number of elements in each granularity level.
         n_max_bins: Maximum number of bins.
     """
@@ -381,6 +383,9 @@ def split_non_similar_genomes(
                 clean_value.append([granularity, cropped_genomes])
             else:
                 clean_value.append([granularity, reference_genomes])
+        if len(clean_value) < n_min_bins:
+            print(f"`{key}` contains {len(clean_value)} values, dropping.")
+            continue
         if len(clean_value) > n_max_bins:
             print(f"`{key}` contains {len(clean_value)} values, reducing.")
             shuffle(clean_value)
