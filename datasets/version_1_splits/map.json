@@ -1,0 +1,118 @@
+{
+    "0": [
+        "Archaea",
+        "Thermoproteota"
+    ],
+    "1": [
+        "Archaea",
+        "Halobacteriota"
+    ],
+    "2": [
+        "Archaea",
+        "Methanobacteriota"
+    ],
+    "3": [
+        "Bacteria",
+        "Acidobacteriota"
+    ],
+    "4": [
+        "Bacteria",
+        "Desulfobacterota"
+    ],
+    "5": [
+        "Bacteria",
+        "Aquificota"
+    ],
+    "6": [
+        "Bacteria",
+        "Planctomycetota"
+    ],
+    "7": [
+        "Bacteria",
+        "Myxococcota"
+    ],
+    "8": [
+        "Bacteria",
+        "Synergistota"
+    ],
+    "9": [
+        "Bacteria",
+        "Chloroflexota"
+    ],
+    "10": [
+        "Bacteria",
+        "Thermotogota"
+    ],
+    "11": [
+        "Bacteria",
+        "Deinococcota"
+    ],
+    "12": [
+        "Bacteria",
+        "Cyanobacteriota"
+    ],
+    "13": [
+        "Bacteria",
+        "Bacteroidota_A"
+    ],
+    "14": [
+        "Bacteria",
+        "Fusobacteriota"
+    ],
+    "15": [
+        "Bacteria",
+        "Chlamydiota"
+    ],
+    "16": [
+        "Bacteria",
+        "Spirochaetota"
+    ],
+    "17": [
+        "Bacteria",
+        "Desulfobacterota_I"
+    ],
+    "18": [
+        "Bacteria",
+        "Verrucomicrobiota"
+    ],
+    "19": [
+        "Bacteria",
+        "Bacteroidota"
+    ],
+    "20": [
+        "Bacteria",
+        "Campylobacterota"
+    ],
+    "21": [
+        "Bacteria",
+        "Actinomycetota"
+    ],
+    "22": [
+        "Bacteria",
+        "Bacillota"
+    ],
+    "23": [
+        "Bacteria",
+        "Pseudomonadota"
+    ],
+    "24": [
+        "Viruses",
+        "Varidnaviria"
+    ],
+    "25": [
+        "Viruses",
+        "Duplodnaviria"
+    ],
+    "26": [
+        "Viruses",
+        "Riboviria"
+    ],
+    "27": [
+        "Viruses",
+        "Adnaviria"
+    ],
+    "28": [
+        "Viruses",
+        "Monodnaviria"
+    ]
+}

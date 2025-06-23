@@ -329,7 +329,7 @@ def find_granularity(lineage, granularity: str) -> tuple[str]:
     return tuple(result)
 
 
-def split_non_similar_genomes(
+def bin_genomes(
         lineages: list[tuple],
         depth: tuple[str],
         granularity_level: str,

@@ -9,15 +9,13 @@
     - License: MIT
 """
 
-from random import sample, shuffle
+from random import shuffle
 import rustworkx as rx
-import matplotlib.axes as plt
-from matplotlib.axes._axes import Axes
 from rustworkx.visualization import mpl_draw
 
 import stelaro.stelaro as stelaro_rust
 
-__all__ = ["ncbi", "gtdb", ]
+__all__ = ["ncbi", "gtdb", "synthetic", ]
 
 
 def synthetic_metagenome(

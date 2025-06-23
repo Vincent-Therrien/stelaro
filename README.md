@@ -65,6 +65,7 @@ maturin develop
 - [ ] Integrate annotation data (CARD, VFDB, BacMet)
 - [ ] Define attention-based architectures and train neural networks (PyTorch).
 - [ ] Virus taxonomy: https://www.ncbi.nlm.nih.gov/labs/virus/vssi/#/virus?SeqType_s=Nucleotide&SourceDB_s=RefSeq
+- [ ] Compare smaller NN models
 
 
 ## Organization
