@@ -30,6 +30,7 @@ packages = [
     "stelaro",
     "stelaro.data",
     "stelaro.transform",
+    "stelaro.models",
 ]
 include-package-data = true
 

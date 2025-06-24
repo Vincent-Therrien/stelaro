@@ -6,4 +6,4 @@
     - License: MIT
 """
 
-__all__ = ["data", "transform", ]
+__all__ = ["data", "transform", "models", ]

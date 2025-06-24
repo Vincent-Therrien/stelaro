@@ -72,7 +72,6 @@ def decode(sequence: list[int]) -> str:
     return "".join(characters)
 
 
-
 def write(
         dataset: list,
         index_to_taxonomic_label: dict,

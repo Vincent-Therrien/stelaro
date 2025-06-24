@@ -408,7 +408,9 @@ def visualize_taxonomy(graph, root, depth) -> None:
         if edges:
             for edge in edges:
                 _, next_node, _ = edge
-                G_nodes[next_node] = G.add_child(G_nodes[node], graph[next_node], 1)
+                G_nodes[next_node] = G.add_child(
+                    G_nodes[node], graph[next_node], 1
+                )
                 recurse(next_node, i + 1)
 
     recurse(root, 0)
