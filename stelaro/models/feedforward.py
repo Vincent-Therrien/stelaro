@@ -27,4 +27,5 @@ class CNN_1(nn.Module):
 
     def forward(self, x):
         x = self.conv(x)
-        return self.fc(x)
+        x = self.fc(x)
+        return x.to(float)

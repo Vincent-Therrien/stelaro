@@ -79,3 +79,25 @@ def test_compress():
     }
     compression = kmer.compress(sequence, scheme)
     assert compression == [4, 2, 2, 2, 2, 4]
+
+
+# scheme = {"N": 0, "NNNNNNNN": 1, "A": 2, "C": 3, "G": 4, "T": 5}
+# sizes = {4: 250}
+# genome_size = data.get_index_size(INDEX)
+# print(f"Genome database length: {genome_size}")
+# for K in sizes:
+#     profile = kmer.profile(INDEX, DIRECTORY, K)
+#     for i in (1, 8, 16, 32):
+#         keys = kmer.extract(profile, i, K // 2)
+#         n = 0
+#         elements = []
+#         for key in keys:
+#             n += profile[key]
+#             elements.append((key, profile[key]))
+#         print(f"K = {K}, {i} highest: {(100.0 * n * K / genome_size):.2f} %")
+#     if K in sizes:
+#         overlap = K // 2 if K > 4 else None
+#         keys = kmer.extract(profile, sizes[K] * 4, overlap)
+#         for i in range(sizes[K]):
+#             scheme[keys[i]] = len(scheme)
+# print(scheme)
