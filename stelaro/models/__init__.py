@@ -8,9 +8,8 @@
 """
 
 from sklearn.metrics import f1_score
-from torch import tensor, no_grad,argmax, half, float32, Tensor
-from torch.nn import functional
-from torch.nn import Module
+from torch import tensor, no_grad,argmax, half, float32, Tensor, zeros
+from torch.nn import CrossEntropyLoss, functional, Module
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
 from tqdm import tqdm
@@ -75,12 +74,34 @@ def rank_based_f1_score(
     return f
 
 
+def create_penalty_matrix(mapping) -> Tensor:
+    """Create a penalty matrix that assigns a higher loss to more taxonomically
+    erroneous predictions."""
+    d = len(mapping)
+    t = zeros((d, d))
+    n_ranks = len(mapping['0'])
+    for i in mapping:
+        for j in range(d):
+            j = str(j)
+            union_length = 0
+            for a, b in zip(mapping[i], mapping[j]):
+                if a == b:
+                    union_length += 1
+                else:
+                    break
+            penalty = (n_ranks - union_length) / n_ranks
+            t[int(i), int(j)] = penalty
+    return t
+
+
 def penalized_cross_entropy(logits, targets, penalty_matrix):
+    """Penalize some class predictions more than others.
+
+    June 2025: This does not improve performance with the `version_1` dataset.
+    """
     log_probs = functional.log_softmax(logits, dim=1)
-    probs = log_probs.exp()
-    batch_size = logits.size(0)
     penalties = penalty_matrix[targets]
-    weighted_loss = (probs * penalties).sum(dim=1)
+    weighted_loss = (log_probs.exp() * penalties).sum(dim=1)
     return weighted_loss.mean()
 
 
@@ -112,7 +133,6 @@ def train(
         model: Module,
         train_loader: DataLoader,
         validate_loader: DataLoader,
-        criterion,
         optimizer,
         max_n_epochs: int,
         patience: int,
@@ -125,7 +145,6 @@ def train(
         model: Neural network
         train_loader: Training data loader
         validate_loader: Validation data loader
-        criterion: Loss function
         optimizer: Optimizer
         max_n_epochs: Maximum number of training epochs.
         patience: Number of epochs during which the validation F1 score is
@@ -134,6 +153,8 @@ def train(
         device: Specify CPU or CUDA.
         mapping: Maps an index to a taxonomic description.
     """
+    criterion = CrossEntropyLoss()
+    # penalty_matrix = create_penalty_matrix(mapping).to(device)
     losses = []
     average_f_scores = []
     best_f1 = 0.0
@@ -147,6 +168,7 @@ def train(
             optimizer.zero_grad()
             output = model(x_batch)
             loss = criterion(output, y_batch)
+            # loss *= penalized_cross_entropy(output, y_batch, penalty_matrix)
             loss.backward()
             optimizer.step()
             losses[-1] += loss.item()
@@ -157,14 +179,15 @@ def train(
             best_f1 = f1[0]
         if f1[0] < best_f1:
             patience -= 1
+        loss_msg = [f"{f:.5}" for f in f1]
         print(
             f"{epoch+1}/{max_n_epochs}",
             f"Loss: {losses[-1]:.2f}.",
-            "F1: ", [f"{f:.5}" for f in f1], " .",
+            f"F1: {loss_msg}.",
             f"Patience: {patience}"
         )
-        if patience < 0:
-            print("Stopping early.")
+        if patience <= 0:
+            print("The model is overfitting; stopping early.")
             break
     average_f_scores = list(np.array(average_f_scores).T)
     return losses, average_f_scores

@@ -1,5 +1,5 @@
 """
-    Feedforward neural network module.
+    Simple feedforward neural network module.
 
     - Author: Vincent Therrien (therrien.vincent.2@courrier.uqam.ca)
     - Affiliation: Département d'informatique, UQÀM
