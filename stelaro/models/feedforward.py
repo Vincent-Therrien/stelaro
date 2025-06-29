@@ -7,7 +7,7 @@
     - License: MIT
 """
 
-from torch.nn import Module, Conv1d, ReLU, Sequential, Flatten, Linear, Softmax
+from torch.nn import Module, Conv1d, ReLU, Sequential, Flatten, Linear
 
 
 class MLP_1(Module):
