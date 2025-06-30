@@ -7,7 +7,74 @@
     - License: MIT
 """
 
-from torch.nn import Module, Conv1d, ReLU, Sequential, Flatten, Linear
+import numpy as np
+from torch import argmax, float32
+from torch.nn import (Module, Conv1d, ReLU, Sequential, Flatten, Linear,
+                      CrossEntropyLoss)
+from torch.utils.data import DataLoader
+from tqdm import tqdm
+from . import evaluate, BaseClassifier
+
+
+class Classifier(BaseClassifier):
+    """A DNA read classification dataset."""
+    def __init__(self, length, mapping, device, model):
+        self.model = model(length, len(mapping)).to(device)
+        self.device = device
+        self.mapping = mapping
+
+    def predict(self, x_batch):
+        self.model.eval()
+        predictions = argmax(self.model(x_batch), dim=1).to("cpu")
+        return predictions
+
+    def train(
+        self,
+        train_loader: DataLoader,
+        validate_loader: DataLoader,
+        optimizer,
+        max_n_epochs: int,
+        patience: int,
+        ):
+        criterion = CrossEntropyLoss()
+        # penalty_matrix = create_penalty_matrix(mapping).to(device)
+        losses = []
+        average_f_scores = []
+        best_f1 = 0.0
+        for epoch in range(max_n_epochs):
+            self.model.train()
+            losses.append(0)
+            for x_batch, y_batch in tqdm(train_loader):
+                x_batch = x_batch.type(float32).to(self.device)
+                # Swap channels and sequence.
+                x_batch = x_batch.permute(0, 2, 1)
+                y_batch = y_batch.type(float32).to(self.device).to(int)
+                optimizer.zero_grad()
+                output = self.model(x_batch)
+                loss = criterion(output, y_batch)
+                # loss *= penalized_cross_entropy(output, y_batch, penalty_matrix)
+                loss.backward()
+                optimizer.step()
+                losses[-1] += loss.item()
+            f1 = evaluate(self, validate_loader, self.device, self.mapping)
+            f1 = [float(f) for f in f1]
+            average_f_scores.append(f1)
+            if f1[0] > best_f1:
+                best_f1 = f1[0]
+            if f1[0] < best_f1:
+                patience -= 1
+            loss_msg = [f"{f:.5}" for f in f1]
+            print(
+                f"{epoch+1}/{max_n_epochs}",
+                f"Loss: {losses[-1]:.2f}.",
+                f"F1: {loss_msg}.",
+                f"Patience: {patience}"
+            )
+            if patience <= 0:
+                print("The model is overfitting; stopping early.")
+                break
+        average_f_scores = list(np.array(average_f_scores).T)
+        return losses, average_f_scores
 
 
 class MLP_1(Module):

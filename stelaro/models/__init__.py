@@ -8,11 +8,10 @@
 """
 
 from sklearn.metrics import f1_score
-from torch import tensor, no_grad,argmax, half, float32, Tensor, zeros
-from torch.nn import CrossEntropyLoss, functional, Module
+from torch import tensor, no_grad, float32, Tensor, zeros
+from torch.nn import functional
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
-from tqdm import tqdm
 
 
 class SyntheticReadDataset(Dataset):
@@ -34,6 +33,42 @@ class SyntheticReadDataset(Dataset):
         x = ((x[:, None] & (1 << (3 - np.arange(4)))) > 0).astype(float)
         y = self.y[idx]
         return tensor(x), tensor(y)
+
+
+class BaseClassifier:
+    """A generic DNA read classifier."""
+    def __init__(self):
+        pass
+
+    def predict(self, x_batch):
+        """Classify DNA reads."""
+        raise NotImplementedError("Can't predict.")
+
+    def train(
+        self,
+        train_loader: DataLoader,
+        validate_loader: DataLoader,
+        optimizer,
+        max_n_epochs: int,
+        patience: int,
+        device: str,
+        mapping: dict,
+        ):
+        """Train a neural network.
+
+        Args:
+            model: Neural network
+            train_loader: Training data loader
+            validate_loader: Validation data loader
+            optimizer: Optimizer
+            max_n_epochs: Maximum number of training epochs.
+            patience: Number of epochs during which the validation F1 score is
+                allowed to decrease before early stop. Set to `None` to avoid
+                early stop.
+            device: Specify CPU or CUDA.
+            mapping: Maps an index to a taxonomic description.
+        """
+        raise NotImplementedError("Can't train.")
 
 
 def obtain_rank_based_mappings(mapping: dict) -> list[dict]:
@@ -105,9 +140,8 @@ def penalized_cross_entropy(logits, targets, penalty_matrix):
     return weighted_loss.mean()
 
 
-def evaluate(model, loader, device, mapping):
+def evaluate(classifier, loader, device, mapping):
     """Evaluate the F1 score at different taxonomic levels."""
-    model.eval()
     mappings = obtain_rank_based_mappings(mapping)
     ranks = []
     n_batches = 0
@@ -116,7 +150,7 @@ def evaluate(model, loader, device, mapping):
             x_batch = x_batch.type(float32).to(device)
             x_batch = x_batch.permute(0, 2, 1)  # Swap channels and sequence.
             y_batch = y_batch.to("cpu")
-            predictions = argmax(model(x_batch), dim=1).to("cpu")
+            predictions = classifier.predict(x_batch)
             ranks.append(rank_based_f1_score(mappings, y_batch, predictions))
             n_batches += 1
     collapsed_ranks = [np.zeros(len(r)) for r in ranks[0]]
@@ -127,67 +161,3 @@ def evaluate(model, loader, device, mapping):
         collapsed_ranks[i] = np.mean(collapsed_ranks[i])
         collapsed_ranks[i] /= n_batches
     return collapsed_ranks
-
-
-def train(
-        model: Module,
-        train_loader: DataLoader,
-        validate_loader: DataLoader,
-        optimizer,
-        max_n_epochs: int,
-        patience: int,
-        device: str,
-        mapping: dict,
-        ):
-    """Train a neural network.
-
-    Args:
-        model: Neural network
-        train_loader: Training data loader
-        validate_loader: Validation data loader
-        optimizer: Optimizer
-        max_n_epochs: Maximum number of training epochs.
-        patience: Number of epochs during which the validation F1 score is
-            allowed to decrease before early stop. Set to `None` to avoid
-            early stop.
-        device: Specify CPU or CUDA.
-        mapping: Maps an index to a taxonomic description.
-    """
-    criterion = CrossEntropyLoss()
-    # penalty_matrix = create_penalty_matrix(mapping).to(device)
-    losses = []
-    average_f_scores = []
-    best_f1 = 0.0
-    for epoch in range(max_n_epochs):
-        model.train()
-        losses.append(0)
-        for x_batch, y_batch in tqdm(train_loader):
-            x_batch = x_batch.type(float32).to(device)
-            x_batch = x_batch.permute(0, 2, 1)  # Swap channels and sequence.
-            y_batch = y_batch.type(float32).to(device).to(int)
-            optimizer.zero_grad()
-            output = model(x_batch)
-            loss = criterion(output, y_batch)
-            # loss *= penalized_cross_entropy(output, y_batch, penalty_matrix)
-            loss.backward()
-            optimizer.step()
-            losses[-1] += loss.item()
-        f1 = evaluate(model, validate_loader, device, mapping)
-        f1 = [float(f) for f in f1]
-        average_f_scores.append(f1)
-        if f1[0] > best_f1:
-            best_f1 = f1[0]
-        if f1[0] < best_f1:
-            patience -= 1
-        loss_msg = [f"{f:.5}" for f in f1]
-        print(
-            f"{epoch+1}/{max_n_epochs}",
-            f"Loss: {losses[-1]:.2f}.",
-            f"F1: {loss_msg}.",
-            f"Patience: {patience}"
-        )
-        if patience <= 0:
-            print("The model is overfitting; stopping early.")
-            break
-    average_f_scores = list(np.array(average_f_scores).T)
-    return losses, average_f_scores
