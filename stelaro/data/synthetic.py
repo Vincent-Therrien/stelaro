@@ -112,7 +112,7 @@ def write(
     # Create the datasets.
     i = 0
     x = np.zeros((n_reads, read_length), dtype=np.int8)
-    y = np.zeros(n_reads, dtype=np.int8)
+    y = np.zeros(n_reads, dtype=np.int16)
     with tqdm(total=n_reads) as progress_bar:
         for label, genome_list in dataset:
             index = find_index_from_label(index_to_taxonomic_label, label)

@@ -7,11 +7,13 @@
     - License: MIT
 """
 
+from random import randint
+import numpy as np
 from sklearn.metrics import f1_score
 from torch import tensor, no_grad, float32, Tensor, zeros
 from torch.nn import functional
 from torch.utils.data import Dataset, DataLoader
-import numpy as np
+from tqdm import tqdm
 
 
 class SyntheticReadDataset(Dataset):
@@ -40,20 +42,21 @@ class BaseClassifier:
     def __init__(self):
         pass
 
+    def get_parameters(self):
+        raise NotImplementedError("Can't get parameters.")
+
     def predict(self, x_batch):
         """Classify DNA reads."""
         raise NotImplementedError("Can't predict.")
 
     def train(
-        self,
-        train_loader: DataLoader,
-        validate_loader: DataLoader,
-        optimizer,
-        max_n_epochs: int,
-        patience: int,
-        device: str,
-        mapping: dict,
-        ):
+            self,
+            train_loader: DataLoader,
+            validate_loader: DataLoader,
+            optimizer,
+            max_n_epochs: int,
+            patience: int,
+            ):
         """Train a neural network.
 
         Args:
@@ -69,6 +72,72 @@ class BaseClassifier:
             mapping: Maps an index to a taxonomic description.
         """
         raise NotImplementedError("Can't train.")
+
+
+class RandomClassifier(BaseClassifier):
+    def __init__(self):
+        pass
+
+    def get_parameters(self):
+        return None
+
+    def predict(self, x_batch):
+        n_reads = x_batch.shape[0]
+        return [randint(0, self.n_classes - 1) for _ in range(n_reads)]
+
+    def train(
+            self,
+            train_loader: DataLoader,
+            validate_loader: DataLoader,
+            optimizer,
+            max_n_epochs: int,
+            patience: int,
+            ):
+        n_classes = 0
+        for _, y_batch in tqdm(train_loader):
+            n = max(y_batch)
+            if n > n_classes:
+                n_classes = n
+        self.n_classes = n_classes
+        return [], []
+
+
+class MajorityClassifier(BaseClassifier):
+    def __init__(self):
+        pass
+
+    def get_parameters(self):
+        return None
+
+    def predict(self, x_batch):
+        n_reads = x_batch.shape[0]
+        return [self.majority_class for _ in range(n_reads)]
+
+    def train(
+            self,
+            train_loader: DataLoader,
+            validate_loader: DataLoader,
+            optimizer,
+            max_n_epochs: int,
+            patience: int,
+            ):
+        counts = {}
+        for _, y_batch in tqdm(train_loader):
+            for y in y_batch:
+                y = int(y)
+                if y in counts:
+                    counts[y] += 1
+                else:
+                    counts[y] = 1
+        print(f"Class counts: {counts}")
+        best_class, n = 0, 0
+        for c, count in counts.items():
+            if count > n:
+                best_class = c
+                n = count
+        self.majority_class = best_class
+        print(f"Majority class: {self.majority_class}")
+        return [], []
 
 
 def obtain_rank_based_mappings(mapping: dict) -> list[dict]:
@@ -160,4 +229,7 @@ def evaluate(classifier, loader, device, mapping):
     for i in range(len(collapsed_ranks)):
         collapsed_ranks[i] = np.mean(collapsed_ranks[i])
         collapsed_ranks[i] /= n_batches
+    collapsed_ranks = [r for r in reversed(collapsed_ranks)]
+    for i in range(len(collapsed_ranks) - 1):
+        assert collapsed_ranks[i] > collapsed_ranks[i + 1]
     return collapsed_ranks
