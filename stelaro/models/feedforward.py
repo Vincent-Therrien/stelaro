@@ -52,10 +52,10 @@ class Classifier(BaseClassifier):
                 # Swap channels and sequence.
                 x_batch = x_batch.permute(0, 2, 1)
                 y_batch = y_batch.type(float32).to(self.device).to(int)
-                optimizer.zero_grad()
                 output = self.model(x_batch)
                 loss = criterion(output, y_batch)
                 # loss *= penalized_cross_entropy(output, y_batch, penalty_matrix)
+                optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
                 losses[-1] += loss.item()
@@ -66,7 +66,7 @@ class Classifier(BaseClassifier):
                 best_f1 = f1[-1]
             if f1[-1] < best_f1:
                 patience -= 1
-            loss_msg = [f"{f:.5}" for f in f1]
+            loss_msg = [float(f"{f:.5}") for f in f1]
             print(
                 f"{epoch+1}/{max_n_epochs}",
                 f"Loss: {losses[-1]:.2f}.",
@@ -178,6 +178,34 @@ class CNN_2(Module):
         self.fc = Sequential(
             Flatten(),
             Linear(N * 128, int(N / 2)),
+            ReLU(),
+            Linear(int(N / 2), 128),
+            ReLU(),
+            Linear(128, M)
+        )
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.fc(x)
+        return x.to(float)
+
+
+class CNN_2_pooling(Module):
+    def __init__(self, N, M):
+        super(CNN_2_pooling, self).__init__()
+        self.conv = Sequential(
+            Conv1d(4, 32, kernel_size=7, padding=3),
+            ReLU(),
+            MaxPool1d(2),
+            Conv1d(32, 64, kernel_size=5, padding=2),
+            ReLU(),
+            MaxPool1d(2),
+            Conv1d(64, 128, kernel_size=3, padding=1),
+            ReLU(),
+        )
+        self.fc = Sequential(
+            Flatten(),
+            Linear(N * 64 // 2, int(N / 2)),
             ReLU(),
             Linear(int(N / 2), 128),
             ReLU(),
