@@ -8,7 +8,7 @@
 """
 
 import numpy as np
-from torch import argmax, float32, unsqueeze
+from torch import argmax, float32
 from torch.nn import (Module, Conv1d, ReLU, Sequential, Flatten, Linear,
                       CrossEntropyLoss, MSELoss, MaxPool1d, ConvTranspose1d,
                       Sigmoid, LeakyReLU)
@@ -43,7 +43,7 @@ class Classifier(BaseClassifier):
             ):
         reconstruction_criterion = MSELoss()
         classification_criterion = CrossEntropyLoss()
-        lamda = 0.5  # Classification / reconstruction weight.
+        classification_weight = 0.25
         losses = []
         average_f_scores = []
         best_f1 = 0.0
@@ -62,7 +62,10 @@ class Classifier(BaseClassifier):
                 classification_loss = classification_criterion(
                     classification, y_batch
                 )
-                loss = reconstruction_loss + lamda * classification_loss
+                loss = (
+                    classification_weight * classification_loss
+                    + (1 - classification_weight) * reconstruction_loss
+                )
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
@@ -142,10 +145,52 @@ class CAA_1(Module):
             Flatten(),
             Linear(N * 64 // 2, N // 2),
             LeakyReLU(),
-            Linear(N // 2, LATENT_SPACE_SIZE)
+            Linear(N // 2, LATENT_SPACE_SIZE),
+            LeakyReLU(),
         )
         self.decoder = Sequential(
             Linear(LATENT_SPACE_SIZE, N // 2),
+            LeakyReLU(),
+            Linear(N // 2, N),
+            LeakyReLU(),
+            Unsqueeze(1),
+            ConvTranspose1d(1, 4, kernel_size=3, stride=1, padding=1),
+            LeakyReLU(),
+            Sigmoid(),
+        )
+        self.classifier = Linear(LATENT_SPACE_SIZE, M)
+
+    def forward(self, x):
+        latent = self.encoder(x)
+        classification = self.classifier(latent)
+        reconstruction = self.decoder(latent)
+        return classification, reconstruction
+
+
+class CAA_2(Module):
+    def __init__(self, N, M):
+        super(CAA_2, self).__init__()
+        LATENT_SPACE_SIZE = 128
+        self.encoder = Sequential(
+            Conv1d(4, 32, kernel_size=7, padding=3),
+            LeakyReLU(),
+            MaxPool1d(kernel_size=2),
+            Conv1d(32, 64, kernel_size=5, padding=2),
+            LeakyReLU(),
+            Conv1d(64, 128, kernel_size=3, padding=1),
+            LeakyReLU(),
+            Flatten(),
+            Linear(N * 128 // 2, N // 2),
+            LeakyReLU(),
+            Linear(N // 2, N // 4),
+            LeakyReLU(),
+            Linear(N // 4, LATENT_SPACE_SIZE),
+            LeakyReLU(),
+        )
+        self.decoder = Sequential(
+            Linear(LATENT_SPACE_SIZE, N // 4),
+            LeakyReLU(),
+            Linear(N // 4, N // 2),
             LeakyReLU(),
             Linear(N // 2, N),
             LeakyReLU(),
