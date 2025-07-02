@@ -8,7 +8,8 @@
 """
 
 import numpy as np
-from torch import argmax, float32
+from torch import (argmax, float32, randn_like, bernoulli, ones_like,
+                   rand_like, clamp)
 from torch.nn import (Module, Conv1d, ReLU, Sequential, Flatten, Linear,
                       CrossEntropyLoss, MSELoss, MaxPool1d, ConvTranspose1d,
                       Sigmoid, LeakyReLU)
@@ -100,9 +101,9 @@ class Unsqueeze(Module):
         return x.unsqueeze(self.dim)
 
 
-class AA_1(Module):
+class AE_1(Module):
     def __init__(self, N, M):
-        super(AA_1, self).__init__()
+        super(AE_1, self).__init__()
         LATENT_SPACE_SIZE = 128
         self.encoder = Sequential(
             Flatten(),
@@ -132,9 +133,9 @@ class AA_1(Module):
         return classification, reconstruction
 
 
-class CAA_1(Module):
+class CAE_1(Module):
     def __init__(self, N, M):
-        super(CAA_1, self).__init__()
+        super(CAE_1, self).__init__()
         LATENT_SPACE_SIZE = 128
         self.encoder = Sequential(
             Conv1d(4, 32, kernel_size=5, padding=2),
@@ -167,30 +168,83 @@ class CAA_1(Module):
         return classification, reconstruction
 
 
-class CAA_2(Module):
+class CAE_2(Module):
     def __init__(self, N, M):
-        super(CAA_2, self).__init__()
+        super(CAE_2, self).__init__()
         LATENT_SPACE_SIZE = 128
         self.encoder = Sequential(
             Conv1d(4, 32, kernel_size=7, padding=3),
-            LeakyReLU(),
+            ReLU(),
             MaxPool1d(kernel_size=2),
             Conv1d(32, 64, kernel_size=5, padding=2),
-            LeakyReLU(),
+            ReLU(),
             Conv1d(64, 128, kernel_size=3, padding=1),
-            LeakyReLU(),
+            ReLU(),
             Flatten(),
             Linear(N * 128 // 2, N // 2),
-            LeakyReLU(),
+            ReLU(),
             Linear(N // 2, N // 4),
-            LeakyReLU(),
+            ReLU(),
             Linear(N // 4, LATENT_SPACE_SIZE),
-            LeakyReLU(),
+            ReLU(),
         )
         self.decoder = Sequential(
             Linear(LATENT_SPACE_SIZE, N // 4),
-            LeakyReLU(),
+            ReLU(),
             Linear(N // 4, N // 2),
+            ReLU(),
+            Linear(N // 2, N),
+            ReLU(),
+            Unsqueeze(1),
+            ConvTranspose1d(1, 4, kernel_size=3, stride=1, padding=1),
+            ReLU(),
+            Sigmoid(),
+        )
+        self.classifier = Linear(LATENT_SPACE_SIZE, M)
+
+    def forward(self, x):
+        latent = self.encoder(x)
+        classification = self.classifier(latent)
+        reconstruction = self.decoder(latent)
+        return classification, reconstruction
+
+
+def add_gaussian_noise(x, std=0.1):
+    noise = randn_like(x) * std
+    return x + noise
+
+
+def add_masking_noise(x, dropout_prob=0.1):
+    mask = bernoulli((1 - dropout_prob) * ones_like(x))
+    return x * mask
+
+
+def add_salt_and_pepper_noise(x, prob=0.1):
+    rand = rand_like(x)
+    x_noisy = x.clone()
+    x_noisy[rand < (prob / 2)] = 0
+    x_noisy[(rand >= (prob / 2)) & (rand < prob)] = 1
+    return x_noisy
+
+
+class DAE_1(Module):
+    def __init__(self, N, M):
+        super(DAE_1, self).__init__()
+        LATENT_SPACE_SIZE = 128
+        self.encoder = Sequential(
+            Conv1d(4, 32, kernel_size=5, padding=2),
+            LeakyReLU(),
+            MaxPool1d(kernel_size=2),
+            Conv1d(32, 64, kernel_size=3, padding=1),
+            LeakyReLU(),
+            Flatten(),
+            Linear(N * 64 // 2, N // 2),
+            LeakyReLU(),
+            Linear(N // 2, LATENT_SPACE_SIZE),
+            LeakyReLU(),
+        )
+        self.decoder = Sequential(
+            Linear(LATENT_SPACE_SIZE, N // 2),
             LeakyReLU(),
             Linear(N // 2, N),
             LeakyReLU(),
@@ -202,7 +256,12 @@ class CAA_2(Module):
         self.classifier = Linear(LATENT_SPACE_SIZE, M)
 
     def forward(self, x):
-        latent = self.encoder(x)
+        if self.training:
+            x_noisy = add_masking_noise(x)
+            x_noisy = clamp(x_noisy, 0.0, 1.0)
+            latent = self.encoder(x_noisy)
+        else:
+            latent = self.encoder(x)
         classification = self.classifier(latent)
         reconstruction = self.decoder(latent)
         return classification, reconstruction
