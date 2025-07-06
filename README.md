@@ -64,8 +64,9 @@ maturin develop
 - [x] Transform synthetic datasets into compact formats to train neural networks.
 - [ ] Integrate annotation data (CARD, VFDB, BacMet)
 - [ ] Define attention-based architectures and train neural networks (PyTorch).
-- [ ] Virus taxonomy: https://www.ncbi.nlm.nih.gov/labs/virus/vssi/#/virus?SeqType_s=Nucleotide&SourceDB_s=RefSeq
-- [ ] Compare smaller NN models
+- [ ] Mamba networks
+- [x] Virus taxonomy: https://www.ncbi.nlm.nih.gov/labs/virus/vssi/#/virus?SeqType_s=Nucleotide&SourceDB_s=RefSeq
+- [x] Compare smaller NN models
 
 
 ## Organization
