@@ -157,27 +157,6 @@ def obtain_rank_based_mappings(mapping: dict) -> list[dict]:
     return mappings
 
 
-def rank_based_f1_score(
-        mappings: dict, target: list[int], predictions: list[int]
-        ) -> list[np.ndarray]:
-    """Evaluate F1 score at multiple taxonomic ranks."""
-    f = []
-    for mapping in mappings:
-        labels = list(set(mapping.values()))
-        normalized_target = [mapping[int(v)] for v in list(target)]
-        normalized_pred = [mapping[int(v)] for v in list(predictions)]
-        f.append(
-            f1_score(
-                normalized_target,
-                normalized_pred,
-                average=None,
-                labels=labels,
-                zero_division=0.0
-            )
-        )
-    return f
-
-
 def create_penalty_matrix(mapping) -> Tensor:
     """Create a penalty matrix that assigns a higher loss to more taxonomically
     erroneous predictions."""
@@ -209,6 +188,27 @@ def penalized_cross_entropy(logits, targets, penalty_matrix):
     return weighted_loss.mean()
 
 
+def rank_based_f1_score(
+        mappings: dict, target: list[int], predictions: list[int]
+        ) -> list[np.ndarray]:
+    """Evaluate F1 score at multiple taxonomic ranks."""
+    f = []
+    for mapping in mappings:
+        labels = list(set(mapping.values()))
+        normalized_target = [mapping[int(v)] for v in list(target)]
+        normalized_pred = [mapping[int(v)] for v in list(predictions)]
+        f.append(
+            f1_score(
+                normalized_target,
+                normalized_pred,
+                average=None,
+                labels=labels,
+                zero_division=0.0
+            )
+        )
+    return f
+
+
 def evaluate(classifier, loader, device, mapping):
     """Evaluate the F1 score at different taxonomic levels."""
     mappings = obtain_rank_based_mappings(mapping)
@@ -233,3 +233,16 @@ def evaluate(classifier, loader, device, mapping):
     for i in range(len(collapsed_ranks) - 1):
         assert collapsed_ranks[i] > collapsed_ranks[i + 1]
     return collapsed_ranks
+
+
+def confusion_matrix(classifier, loader, device, mapping):
+    matrix = np.zeros((len(mapping), len(mapping)))
+    with no_grad():
+        for x_batch, y_batch in loader:
+            x_batch = x_batch.type(float32).to(device)
+            x_batch = x_batch.permute(0, 2, 1)  # Swap channels and sequence.
+            y_batch = y_batch.to("cpu")
+            predictions = classifier.predict(x_batch)
+            for y, p in zip(y_batch, predictions):
+                matrix[y][p] += 1
+    return matrix
