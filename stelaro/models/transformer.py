@@ -92,11 +92,11 @@ class T_1(Module):
         self.pos_embedding = Parameter(randn(1, N, d_model))
         encoder_layer = TransformerEncoderLayer(
             d_model=d_model,
-            nhead=2,
+            nhead=4,
             dropout=0.1,
             batch_first=True
         )
-        self.encoder = TransformerEncoder(encoder_layer, num_layers=2)
+        self.encoder = TransformerEncoder(encoder_layer, num_layers=4)
         self.classifier = Sequential(
             Linear(d_model, d_model),
             ReLU(),

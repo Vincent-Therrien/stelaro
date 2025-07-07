@@ -235,7 +235,8 @@ def evaluate(classifier, loader, device, mapping):
     return collapsed_ranks
 
 
-def confusion_matrix(classifier, loader, device, mapping):
+def confusion_matrix(classifier, loader, device, mapping) -> np.ndarray:
+    """Returns: A confusion matrix with rows corresponding to true labels."""
     matrix = np.zeros((len(mapping), len(mapping)))
     with no_grad():
         for x_batch, y_batch in loader:
@@ -246,3 +247,15 @@ def confusion_matrix(classifier, loader, device, mapping):
             for y, p in zip(y_batch, predictions):
                 matrix[y][p] += 1
     return matrix
+
+
+def get_f1_by_category(confusion) -> np.ndarray:
+    f1 = np.zeros(len(confusion))
+    for i in range(len(confusion)):
+        TP = confusion[i][i]
+        FN = sum(confusion[i]) - TP
+        FP = np.sum(confusion, axis=0)[i] - TP
+        d = 2 * TP + FP + FN
+        if d:
+            f1[i] = 2 * TP / d
+    return f1
