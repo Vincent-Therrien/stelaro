@@ -10,7 +10,7 @@
 from random import randint
 import numpy as np
 from sklearn.metrics import f1_score
-from torch import tensor, no_grad, float32, Tensor, zeros
+from torch import tensor, no_grad, float32, Tensor, zeros, from_numpy
 from torch.nn import functional
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
@@ -26,6 +26,22 @@ class SyntheticReadDataset(Dataset):
         """
         self.x = np.load(directory + "x.npy", mmap_mode=mapping)
         self.y = np.load(directory + "y.npy", mmap_mode=mapping)
+
+    def __len__(self):
+        return len(self.y)
+
+    def __getitem__(self, idx):
+        x = self.x[idx]
+        x = ((x[:, None] & (1 << (3 - np.arange(4)))) > 0).astype(float)
+        y = self.y[idx]
+        return tensor(x), tensor(y)
+
+
+class BasicReadDataset(Dataset):
+    """Dataset containing one-hot encoded synthetic reads."""
+    def __init__(self, x, y):
+        self.x = from_numpy(x)
+        self.y = from_numpy(y)
 
     def __len__(self):
         return len(self.y)
