@@ -177,7 +177,7 @@ def sample_dataset(
             _, genomes = reference_genome
             genome_counts[index] += len(genomes)
             n_genomes += len(genomes)
-    print(f"Estimated file size: {size / 1000000} MB.")
+    print(f"Estimated size: {size / 1000000} MB.")
     print(f"Average number of reads per bin: {n_reads / len(dataset):.2f}")
     # Create the datasets.
     i = 0
@@ -198,7 +198,7 @@ def sample_dataset(
                         try:
                             reads = sample_read(genome, 1, read_length)
                         except Exception as e:
-                            print(f"Error on {genome_id}: {e}")
+                            pass  # print(f"Error on {genome_id}: {e}")
                         for read in reads:
                             x[i] = read
                             y[i] = index

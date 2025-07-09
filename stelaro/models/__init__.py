@@ -40,8 +40,8 @@ class SyntheticReadDataset(Dataset):
 class BasicReadDataset(Dataset):
     """Dataset containing one-hot encoded synthetic reads."""
     def __init__(self, x, y):
-        self.x = from_numpy(x)
-        self.y = from_numpy(y)
+        self.x = x
+        self.y = y
 
     def __len__(self):
         return len(self.y)
