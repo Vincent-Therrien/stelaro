@@ -4,10 +4,7 @@ extern crate ocl;
 #[macro_use]
 extern crate lazy_static;
 
-pub mod io {
-    pub mod format;
-    pub mod sequence;
-}
+pub mod io;
 
 pub mod data;
 
