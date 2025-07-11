@@ -19,7 +19,7 @@ pub fn database(
     sequence_file_directory: &Path,
     output_directory: &Path,
     max_file_size: usize,
-    sequences: &HashMap<String, u32>
+    index: &Vec<(String, u64)>
 ) -> Result<u32, Box<dyn Error>> {
     Ok(0)
 }
