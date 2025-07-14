@@ -259,7 +259,7 @@ def compress_dataset(
         read_length: int,
         output_directory: str,
         max_n_reads: int = 1_000_000
-        ) -> tuple[np.ndarray]:
+        ) -> None:
     """Compress sequencing files into Numpy arrays.
 
     Args:
@@ -320,3 +320,23 @@ def compress_dataset(
     save(x, y, file_number)
     with open(output_directory + "counts.json", "w") as file:
         json.dump(counts, file, indent=4)
+
+
+def sample_compressed_reads(
+        n_reads: int,
+        directory: str,
+    ) -> tuple[np.ndarray]:
+    """Sample a balanced read dataset from a compressed genome dataset."""
+    assert directory.endswith("/")
+    with open(directory + "counts.json", "r") as file:
+        counts = json.load(file)
+    y = None
+    for identifier, count in counts.items():
+        partial_y = np.load(directory + str(identifier) + "_y.npy")
+        partial_y = partial_y[:count]
+        if y is None:
+            y = partial_y
+        else:
+            y = np.concatenate((y, partial_y))
+    frequencies = np.bincount(y)
+    print(frequencies)
