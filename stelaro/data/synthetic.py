@@ -389,7 +389,7 @@ def sample_compressed_dataset(
                 break
             local_src_index = global_src_index - global_offset
             if 0 <= local_src_index < count:
-                x[i] = partial_x[local_src_index]
-                y[i] = partial_y[local_src_index]
+                x[i - offset] = partial_x[local_src_index]
+                y[i - offset] = partial_y[local_src_index]
         global_offset += count
     return x, y
