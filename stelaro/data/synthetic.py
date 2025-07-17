@@ -8,7 +8,7 @@
 """
 
 import numpy as np
-from random import choices, randint
+from random import choices, randint, shuffle
 from tqdm import tqdm
 import json
 from . import read_genome
@@ -252,6 +252,22 @@ def sample_dataset(
     return x, y
 
 
+def evaluate_n_nucleotides(
+        references: tuple[str],
+        reference_genome_directory: str,
+        ) -> int:
+    """Obtain the number of nucleotides in a set of genomes."""
+    assert reference_genome_directory.endswith("/")
+    length = 0
+    for reference in references:
+        filename = f"{reference_genome_directory}{reference}.fna"
+        genome = read_genome(filename)
+        for fragment in genome:
+            name, sequence = fragment
+            length += len(sequence)
+    return length
+
+
 def compress_dataset(
         dataset: list,
         index_to_taxonomic_label: dict,
@@ -322,11 +338,10 @@ def compress_dataset(
         json.dump(counts, file, indent=4)
 
 
-def sample_compressed_reads(
-        n_reads: int,
+def get_n_reads_in_compressed_dataset(
         directory: str,
     ) -> tuple[np.ndarray]:
-    """Sample a balanced read dataset from a compressed genome dataset."""
+    """Get the number of reads in a compressed dataset."""
     assert directory.endswith("/")
     with open(directory + "counts.json", "r") as file:
         counts = json.load(file)
@@ -339,4 +354,42 @@ def sample_compressed_reads(
         else:
             y = np.concatenate((y, partial_y))
     frequencies = np.bincount(y)
-    print(frequencies)
+    return sum(frequencies)
+
+
+def get_random_identifiers(n: int) -> dict:
+    identifiers = list(range(n))
+    shuffle(identifiers)
+    return {i: r for i, r in zip(range(n), identifiers)}
+
+
+def sample_compressed_dataset(
+        directory: str,
+        n: int,
+        read_length: int,
+        identifiers: dict,
+        offset: int,
+        ):
+    """Obtain reads from a compressed dataset."""
+    assert directory.endswith("/")
+    x = np.zeros((n, int(read_length / 4)), dtype=np.uint8)
+    y = np.zeros(n, dtype=np.uint16)
+    with open(directory + "counts.json", "r") as file:
+        counts = json.load(file)
+    global_offset = 0
+    for identifier, count in counts.items():
+        partial_x = np.load(directory + str(identifier) + "_x.npy")
+        partial_x = partial_x[:count]
+        partial_y = np.load(directory + str(identifier) + "_y.npy")
+        partial_y = partial_y[:count]
+        for i, global_src_index in identifiers.items():
+            if i < offset:
+                continue
+            if i >= offset + n:
+                break
+            local_src_index = global_src_index - global_offset
+            if 0 <= local_src_index < count:
+                x[i] = partial_x[local_src_index]
+                y[i] = partial_y[local_src_index]
+        global_offset += count
+    return x, y
