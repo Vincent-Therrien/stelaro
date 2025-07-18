@@ -79,6 +79,59 @@ class Classifier(BaseClassifier):
         average_f_scores = list(np.array(average_f_scores).T)
         return losses, average_f_scores
 
+    def train_large_dataset(
+            self,
+            train_loader: DataLoader,
+            validate_loader: DataLoader,
+            optimizer,
+            evaluation_interval: int,
+            n_max_reads: int,
+            patience: int,
+            ):
+        """Same as `train`, but this method assumes that the training set is
+        infinite.
+        """
+        criterion = CrossEntropyLoss()
+        # penalty_matrix = create_penalty_matrix(mapping).to(device)
+        losses = []
+        average_f_scores = []
+        best_f1 = 0.0
+        for partition in range(n_max_partitions):
+            for x_batch, y_batch in tqdm(train_loader):
+                self.model.train()
+                losses.append(0)
+                x_batch = x_batch.type(float32).to(self.device)
+                # Swap channels and sequence.
+                x_batch = x_batch.permute(0, 2, 1)
+                y_batch = y_batch.type(float32).to(self.device).to(int)
+                output = self.model(x_batch)
+                loss = criterion(output, y_batch)
+                # loss *= penalized_cross_entropy(output, y_batch, penalty_matrix)
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                losses[-1] += loss.item()
+            f1 = evaluate(self, validate_loader, self.device, self.mapping)
+            f1 = [float(f) for f in f1]
+            average_f_scores.append(f1)
+            if f1[-1] > best_f1:
+                best_f1 = f1[-1]
+            if f1[-1] < best_f1:
+                patience -= 1
+            loss_msg = [float(f"{f:.5}") for f in f1]
+            print(
+                f"{partition+1}/{n_max_partitions}",
+                f"Loss: {losses[-1]:.2f}.",
+                f"F1: {loss_msg}.",
+                f"Patience: {patience}"
+            )
+            if patience <= 0:
+                print("The model is overfitting; stopping early.")
+                break
+
+        average_f_scores = list(np.array(average_f_scores).T)
+        return losses, average_f_scores
+
 
 class MLP_1(Module):
     def __init__(self, N, M):

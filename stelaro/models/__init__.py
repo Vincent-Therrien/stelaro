@@ -117,6 +117,27 @@ class RandomClassifier(BaseClassifier):
         self.n_classes = n_classes
         return [], []
 
+    def train_large_dataset(
+            self,
+            train_loader: DataLoader,
+            validate_loader: DataLoader,
+            optimizer,
+            evaluation_interval: int,
+            n_max_reads: int,
+            patience: int,
+            ):
+        n_classes = 0
+        n_total_reads = 0
+        for _, y_batch in tqdm(train_loader):
+            n = max(y_batch)
+            if n > n_classes:
+                n_classes = n
+            n_total_reads += len(y_batch)
+            if n_total_reads > n_max_reads:
+                break
+        self.n_classes = n_classes
+        return [], []
+
 
 class MajorityClassifier(BaseClassifier):
     def __init__(self):
