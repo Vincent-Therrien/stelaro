@@ -246,7 +246,7 @@ def rank_based_f1_score(
     return f
 
 
-def evaluate(classifier, loader, device, mapping):
+def evaluate(classifier, loader, device, mapping, permute=True):
     """Evaluate the F1 score at different taxonomic levels."""
     mappings = obtain_rank_based_mappings(mapping)
     ranks = []
@@ -254,7 +254,8 @@ def evaluate(classifier, loader, device, mapping):
     with no_grad():
         for x_batch, y_batch in loader:
             x_batch = x_batch.type(float32).to(device)
-            x_batch = x_batch.permute(0, 2, 1)  # Swap channels and sequence.
+            if permute:
+                x_batch = x_batch.permute(0, 2, 1)  # Swap channels and sequence.
             y_batch = y_batch.to("cpu")
             predictions = classifier.predict(x_batch)
             ranks.append(rank_based_f1_score(mappings, y_batch, predictions))

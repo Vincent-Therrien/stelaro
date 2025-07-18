@@ -408,11 +408,12 @@ def sample_compressed_dataset(
 
 class SyntheticReadDataset(Dataset):
     def __init__(self, directory: str, n: int, read_length: int):
-        ids = get_random_identifiers(n)
+        total_reads = get_n_reads_in_compressed_dataset(directory)
+        ids = get_random_identifiers(total_reads)
         self.n = n
         self.x, self.y = sample_compressed_dataset(
             directory,
-            n,
+            total_reads,
             read_length,
             ids,
             0
@@ -450,7 +451,6 @@ class CompressedReadDataset(Dataset):
         self.offset = 0
         self.partition_size = partition_size
         self.n = get_n_reads_in_compressed_dataset(directory)
-        print(self.n)
         self.identifiers = get_random_identifiers(self.n)
         probe = np.load(directory + "0_x.npy")
         self.read_length = probe.shape[1] * 4
@@ -474,6 +474,10 @@ class CompressedReadDataset(Dataset):
 
     def __len__(self):
         return self.n
+
+    def reset(self):
+        self.offset = 0
+        self.load_partition()
 
     def __getitem__(self, idx):
         local_index = idx - self.offset
