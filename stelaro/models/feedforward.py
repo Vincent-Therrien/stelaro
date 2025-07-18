@@ -93,44 +93,54 @@ class Classifier(BaseClassifier):
         """
         criterion = CrossEntropyLoss()
         # penalty_matrix = create_penalty_matrix(mapping).to(device)
-        losses = []
+        losses = [0]
         average_f_scores = []
         best_f1 = 0.0
-        for partition in range(n_max_partitions):
-            for x_batch, y_batch in tqdm(train_loader):
-                self.model.train()
+        n_reads_processed = 0
+        evaluation_countdown = evaluation_interval
+        for x_batch, y_batch in tqdm(train_loader):
+            self.model.train()
+            x_batch = x_batch.type(float32).to(self.device)
+            # Swap channels and sequence.
+            y_batch = y_batch.type(float32).to(self.device).to(int)
+            output = self.model(x_batch)
+            loss = criterion(output, y_batch)
+            # loss *= penalized_cross_entropy(output, y_batch, penalty_matrix)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            losses[-1] += loss.item()
+            n_reads_processed += len(y_batch)
+            evaluation_countdown -= len(y_batch)
+            if evaluation_countdown <= 0:
+                evaluation_countdown = evaluation_interval
+                f1 = evaluate(self, validate_loader, self.device, self.mapping, permute=False)
+                f1 = [float(f) for f in f1]
+                average_f_scores.append(f1)
+                if f1[-1] > best_f1:
+                    best_f1 = f1[-1]
+                if f1[-1] < best_f1:
+                    patience -= 1
+                loss_msg = [float(f"{f:.5}") for f in f1]
+                print(
+                    f"N Reads: {n_reads_processed}",
+                    f"Loss: {losses[-1]:.2f}.",
+                    f"F1: {loss_msg}.",
+                    f"Patience: {patience}"
+                )
                 losses.append(0)
-                x_batch = x_batch.type(float32).to(self.device)
-                # Swap channels and sequence.
-                x_batch = x_batch.permute(0, 2, 1)
-                y_batch = y_batch.type(float32).to(self.device).to(int)
-                output = self.model(x_batch)
-                loss = criterion(output, y_batch)
-                # loss *= penalized_cross_entropy(output, y_batch, penalty_matrix)
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-                losses[-1] += loss.item()
-            f1 = evaluate(self, validate_loader, self.device, self.mapping)
-            f1 = [float(f) for f in f1]
-            average_f_scores.append(f1)
-            if f1[-1] > best_f1:
-                best_f1 = f1[-1]
-            if f1[-1] < best_f1:
-                patience -= 1
-            loss_msg = [float(f"{f:.5}") for f in f1]
-            print(
-                f"{partition+1}/{n_max_partitions}",
-                f"Loss: {losses[-1]:.2f}.",
-                f"F1: {loss_msg}.",
-                f"Patience: {patience}"
-            )
-            if patience <= 0:
-                print("The model is overfitting; stopping early.")
+                if patience <= 0:
+                    print("The model is overfitting; stopping early.")
+                    break
+            if n_reads_processed > n_max_reads:
+                print("Reached the specified maximum number of reads.")
                 break
+        else:
+            print("Exhausted all reads.")
 
+        print(f"Processed {n_reads_processed:_} reads.")
         average_f_scores = list(np.array(average_f_scores).T)
-        return losses, average_f_scores
+        return losses[:-1], average_f_scores
 
 
 class MLP_1(Module):
@@ -295,6 +305,36 @@ class CNN_2_dropout(Module):
         )
 
     def forward(self, x):
+        x = self.conv(x)
+        x = self.fc(x)
+        return x.to(float)
+
+
+class CNN_2_dropout_token(Module):
+    def __init__(self, N, M):
+        super(CNN_2_dropout_token, self).__init__()
+        self.conv = Sequential(
+            Conv1d(1, 32, kernel_size=7, padding=3),
+            ReLU(),
+            Conv1d(32, 64, kernel_size=5, padding=2),
+            ReLU(),
+            Conv1d(64, 128, kernel_size=3, padding=1),
+            ReLU(),
+        )
+        self.fc = Sequential(
+            Flatten(),
+            Dropout(0.2),
+            Linear(N * 128, int(N / 2)),
+            ReLU(),
+            Dropout(0.2),
+            Linear(int(N / 2), 128),
+            ReLU(),
+            Dropout(0.2),
+            Linear(128, M)
+        )
+
+    def forward(self, x):
+        x = x.unsqueeze(1)
         x = self.conv(x)
         x = self.fc(x)
         return x.to(float)
