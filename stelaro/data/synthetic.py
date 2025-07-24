@@ -355,8 +355,7 @@ def get_n_reads_in_compressed_dataset(
             y = partial_y
         else:
             y = np.concatenate((y, partial_y))
-    frequencies = np.bincount(y)
-    return sum(frequencies)
+    return np.bincount(y)
 
 
 def get_random_identifiers(n: int) -> dict:
@@ -407,8 +406,19 @@ def sample_compressed_dataset(
 
 
 class SyntheticReadDataset(Dataset):
+    """Dataset containing 4mer-encoded synthetic reads stored in multiple
+    files.
+
+    The directory containing the reads is expected to contain the files:
+    - `<x>_x.npy`, where `<x>` is an integer.
+    - `<y>_y.npy`, where `<y>` is an integer.
+    - `counts.json`
+
+    Data are fully loaded from disk into main memory, so the dataset has to
+    be limited in size.
+    """
     def __init__(self, directory: str, n: int, read_length: int):
-        total_reads = get_n_reads_in_compressed_dataset(directory)
+        total_reads = sum(get_n_reads_in_compressed_dataset(directory))
         ids = get_random_identifiers(total_reads)
         self.n = n
         self.x, self.y = sample_compressed_dataset(
@@ -436,7 +446,8 @@ class CompressedReadDataset(Dataset):
     - `<y>_y.npy`, where `<y>` is an integer.
     - `counts.json`
 
-    Data are loaded from disk into main memory.
+    Data are loaded from disk into main memory in chunks, so the full dataset
+    can be arbitrarily large.
     """
     def __init__(
             self,
@@ -450,7 +461,7 @@ class CompressedReadDataset(Dataset):
         self.directory = directory
         self.offset = 0
         self.partition_size = partition_size
-        self.n = get_n_reads_in_compressed_dataset(directory)
+        self.n = sum(get_n_reads_in_compressed_dataset(directory))
         self.identifiers = get_random_identifiers(self.n)
         probe = np.load(directory + "0_x.npy")
         self.read_length = probe.shape[1] * 4
