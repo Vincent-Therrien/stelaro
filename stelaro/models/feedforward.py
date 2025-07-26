@@ -51,7 +51,7 @@ class Classifier(BaseClassifier):
                 x_batch = x_batch.type(float32).to(self.device)
                 # Swap channels and sequence.
                 x_batch = x_batch.permute(0, 2, 1)
-                y_batch = y_batch.type(float32).to(self.device).to(int)
+                y_batch = y_batch.long().to(self.device)
                 output = self.model(x_batch)
                 loss = criterion(output, y_batch)
                 # loss *= penalized_cross_entropy(output, y_batch, penalty_matrix)
@@ -102,7 +102,7 @@ class Classifier(BaseClassifier):
             self.model.train()
             x_batch = x_batch.type(float32).to(self.device)
             # Swap channels and sequence.
-            y_batch = y_batch.type(float32).to(self.device).to(int)
+            y_batch = y_batch.long().to(self.device)
             output = self.model(x_batch)
             loss = criterion(output, y_batch)
             # loss *= penalized_cross_entropy(output, y_batch, penalty_matrix)

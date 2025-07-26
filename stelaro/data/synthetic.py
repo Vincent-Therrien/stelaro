@@ -365,6 +365,65 @@ def get_random_identifiers(n: int) -> dict:
     return {i: r for i, r in zip(range(n), identifiers)}
 
 
+def get_floored_random_identifiers(directory: str, floor: int, n: int) -> dict:
+    """Same as `get_random_identifiers`, but generates identifiers that
+    include all elements of a class if its count is low.
+    """
+    assert floor > 1, "Invalid floor."
+    # Determine the number of samples for each class.
+    total_reads = get_n_reads_in_compressed_dataset(directory)
+    counts_to_fetch = {}
+    for i, n_reads in enumerate(total_reads):
+        if n_reads < floor:
+            counts_to_fetch[i] = int(n_reads)
+        else:
+            counts_to_fetch[i] = 0
+    n_remaining = n - sum(counts_to_fetch.values())
+    n_remaining_classes = len([0 for _, v in counts_to_fetch.items() if v == 0])
+    average = n_remaining / n_remaining_classes
+    for i, n_reads in enumerate(total_reads):
+        if counts_to_fetch[i] == 0:
+            counts_to_fetch[i] = int(average)
+            if average > n_reads:
+                raise RuntimeError(
+                    "Insufficient number of reads. "
+                    + f"Required: {average}. Available: {n_reads}."
+                )
+    # Obtain sample indices.
+    assert directory.endswith("/")
+    with open(directory + "counts.json", "r") as file:
+        counts = json.load(file)
+    identifiers = {k: [] for k in counts_to_fetch}
+    global_index = 0
+    for identifier, count in counts.items():
+        partial_y = np.load(directory + str(identifier) + "_y.npy")
+        partial_y = partial_y[:count]
+        for i in range(len(partial_y)):
+            identifiers[partial_y[i]].append(global_index)
+            global_index += 1
+    # Reduce the number of samples.
+    indices = []
+    for i in range(len(identifiers)):
+        shuffle(identifiers[i])
+        indices += identifiers[i][:counts_to_fetch[i]]
+    shuffle(indices)
+    identifiers = {}
+    for i, v in enumerate(indices):
+        identifiers[i] = v
+    return identifiers
+
+
+def get_balanced_random_identifiers(directory: str, floor: int) -> dict:
+    """TODO"""
+    total_reads = get_n_reads_in_compressed_dataset(directory)
+    counts_to_fetch = {}
+    for i, n_reads in enumerate(total_reads):
+        if n_reads < floor:
+            counts_to_fetch[i] = int(n_reads)
+        else:
+            counts_to_fetch[i] = 0
+
+
 def sample_compressed_dataset(
         directory: str,
         n: int,
@@ -417,9 +476,9 @@ class SyntheticReadDataset(Dataset):
     Data are fully loaded from disk into main memory, so the dataset has to
     be limited in size.
     """
-    def __init__(self, directory: str, n: int, read_length: int):
+    def __init__(self, directory: str, n: int, read_length: int, floor = 1000):
         total_reads = sum(get_n_reads_in_compressed_dataset(directory))
-        ids = get_random_identifiers(total_reads)
+        ids = get_floored_random_identifiers(directory, floor, n)
         self.n = n
         self.x, self.y = sample_compressed_dataset(
             directory,

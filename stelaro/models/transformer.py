@@ -23,16 +23,19 @@ from . import evaluate, BaseClassifier
 
 class Classifier(BaseClassifier):
     """A DNA read classification dataset."""
-    def __init__(self, length, mapping, device, model):
+    def __init__(self, length, mapping, device, model, use_tokens=False):
         self.model = model(length, len(mapping)).to(device)
         self.device = device
         self.mapping = mapping
+        self.use_tokens = use_tokens
 
     def get_parameters(self):
         return self.model.parameters()
 
     def predict(self, x_batch):
         self.model.eval()
+        if self.use_tokens:
+            x_batch = x_batch.to(int)
         predictions = argmax(self.model(x_batch), dim=1).to("cpu")
         return predictions
 
@@ -82,6 +85,69 @@ class Classifier(BaseClassifier):
                 break
         average_f_scores = list(np.array(average_f_scores).T)
         return losses, average_f_scores
+
+    def train_large_dataset(
+            self,
+            train_loader: DataLoader,
+            validate_loader: DataLoader,
+            optimizer,
+            evaluation_interval: int,
+            n_max_reads: int,
+            patience: int,
+            ):
+        """Same as `train`, but this method assumes that the training set is
+        infinite.
+        """
+        criterion = CrossEntropyLoss()
+        # penalty_matrix = create_penalty_matrix(mapping).to(device)
+        losses = [0]
+        average_f_scores = []
+        best_f1 = 0.0
+        n_reads_processed = 0
+        evaluation_countdown = evaluation_interval
+        for x_batch, y_batch in tqdm(train_loader):
+            self.model.train()
+            x_batch = x_batch.long().to(self.device)
+            # Swap channels and sequence.
+            y_batch = y_batch.long().to(self.device)
+            output = self.model(x_batch)
+            loss = criterion(output, y_batch)
+            # loss *= penalized_cross_entropy(output, y_batch, penalty_matrix)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            losses[-1] += loss.item()
+            n_reads_processed += len(y_batch)
+            evaluation_countdown -= len(y_batch)
+            if evaluation_countdown <= 0:
+                evaluation_countdown = evaluation_interval
+                f1 = evaluate(self, validate_loader, self.device, self.mapping, permute=False)
+                f1 = [float(f) for f in f1]
+                average_f_scores.append(f1)
+                if f1[-1] > best_f1:
+                    best_f1 = f1[-1]
+                if f1[-1] < best_f1:
+                    patience -= 1
+                loss_msg = [float(f"{f:.5}") for f in f1]
+                print(
+                    f"N Reads: {n_reads_processed}",
+                    f"Loss: {losses[-1]:.2f}.",
+                    f"F1: {loss_msg}.",
+                    f"Patience: {patience}"
+                )
+                losses.append(0)
+                if patience <= 0:
+                    print("The model is overfitting; stopping early.")
+                    break
+            if n_reads_processed > n_max_reads:
+                print("Reached the specified maximum number of reads.")
+                break
+        else:
+            print("Exhausted all reads.")
+
+        print(f"Processed {n_reads_processed:_} reads.")
+        average_f_scores = list(np.array(average_f_scores).T)
+        return losses[:-1], average_f_scores
 
 
 class T_1(Module):
