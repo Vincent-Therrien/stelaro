@@ -413,6 +413,25 @@ def get_floored_random_identifiers(directory: str, floor: int, n: int) -> dict:
     return identifiers
 
 
+def get_identifiers_by_class(directory: str) -> dict:
+    total_reads = get_n_reads_in_compressed_dataset(directory)
+    counts_to_fetch = {}
+    for i, n_reads in enumerate(total_reads):
+        counts_to_fetch[i] = int(n_reads)
+    assert directory.endswith("/")
+    with open(directory + "counts.json", "r") as file:
+        counts = json.load(file)
+    identifiers = {k: [] for k in counts_to_fetch}
+    global_index = 0
+    for identifier, count in counts.items():
+        partial_y = np.load(directory + str(identifier) + "_y.npy")
+        partial_y = partial_y[:count]
+        for i in range(len(partial_y)):
+            identifiers[partial_y[i]].append(global_index)
+            global_index += 1
+    return identifiers
+
+
 def get_balanced_random_identifiers(directory: str, floor: int) -> dict:
     """TODO"""
     total_reads = get_n_reads_in_compressed_dataset(directory)
@@ -512,19 +531,46 @@ class CompressedReadDataset(Dataset):
             self,
             directory: str,
             partition_size: int,
+            n_max_repeats: int
             ):
-        """Args:
+        """
+        Args:
             directory: Path of the directory that contains the x and y files.
             fragment: Number of reads in a partition of the dataset.
+            n_max_repeats: Maximum number of times that a fragment is allowed
+                to be repeated to balance a dataset.
         """
         self.directory = directory
         self.offset = 0
         self.partition_size = partition_size
         self.n = sum(get_n_reads_in_compressed_dataset(directory))
-        self.identifiers = get_random_identifiers(self.n)
+        self.identifiers_by_class = get_identifiers_by_class(directory)
+        self.frequencies = {
+            i: len(c) / self.n for i, c in self.identifiers_by_class.items()
+        }
         probe = np.load(directory + "0_x.npy")
         self.read_length = probe.shape[1] * 4
+        self.n_max_repeats = n_max_repeats
+        self.set_identifiers(self.frequencies, n_max_repeats)
         self.load_partition()
+
+    def set_identifiers(self, frequencies, n_max_repeats) -> None:
+        identifier_list = []
+        threshold = max(frequencies.values()) * 0.25
+        reference = sum(frequencies.values()) / len(frequencies)
+        max_delta = reference - min(frequencies.values())
+        for frequency, i in zip(frequencies.values(), self.identifiers_by_class):
+            if frequency > threshold:
+                identifier_list += self.identifiers_by_class[i]
+            else:
+                delta = reference - frequency
+                factor = delta / max_delta
+                n_repeats = int(factor * n_max_repeats)
+                identifier_list += self.identifiers_by_class[i] * n_repeats
+        shuffle(identifier_list)
+        self.identifiers = {
+            i: r for i, r in zip(range(self.n), identifier_list)
+        }
 
     def load_partition(self):
         if self.offset + self.partition_size >= self.n:
