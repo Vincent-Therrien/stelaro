@@ -123,7 +123,7 @@ class Classifier(BaseClassifier):
                     patience -= 1
                 loss_msg = [float(f"{f:.5}") for f in f1]
                 print(
-                    f"N Reads: {n_reads_processed}",
+                    f"N Reads: {n_reads_processed:_}",
                     f"Loss: {losses[-1]:.2f}.",
                     f"F1: {loss_msg}.",
                     f"Patience: {patience}"
