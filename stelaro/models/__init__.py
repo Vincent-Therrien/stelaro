@@ -273,13 +273,14 @@ def evaluate(classifier, loader, device, mapping, permute=True):
     return collapsed_ranks
 
 
-def confusion_matrix(classifier, loader, device, mapping) -> np.ndarray:
+def confusion_matrix(classifier, loader, device, mapping, permute=True) -> np.ndarray:
     """Returns: A confusion matrix with rows corresponding to true labels."""
     matrix = np.zeros((len(mapping), len(mapping)))
     with no_grad():
         for x_batch, y_batch in loader:
             x_batch = x_batch.type(float32).to(device)
-            x_batch = x_batch.permute(0, 2, 1)  # Swap channels and sequence.
+            if permute:
+                x_batch = x_batch.permute(0, 2, 1)  # Swap channels and sequence.
             y_batch = y_batch.to("cpu")
             predictions = classifier.predict(x_batch)
             for y, p in zip(y_batch, predictions):

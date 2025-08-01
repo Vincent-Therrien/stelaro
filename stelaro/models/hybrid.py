@@ -19,7 +19,7 @@ from torch.nn import (Module, Conv1d, ReLU, Sequential, Flatten, Linear,
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from . import evaluate, BaseClassifier
+from . import evaluate, get_f1_by_category, confusion_matrix, BaseClassifier
 
 
 class Classifier(BaseClassifier):
@@ -168,6 +168,102 @@ class Classifier(BaseClassifier):
                 if patience <= 0:
                     print("The model is overfitting; stopping early.")
                     break
+            if n_reads_processed > n_max_reads:
+                print("Reached the specified maximum number of reads.")
+                break
+        else:
+            print("Exhausted all reads.")
+
+        print(f"Processed {n_reads_processed:_} reads.")
+        average_f_scores = list(np.array(average_f_scores).T)
+        return losses[:-1], average_f_scores
+
+    def train_large_dataset_adaptive(
+            self,
+            train_loader: DataLoader,
+            validate_loader: DataLoader,
+            optimizer,
+            evaluation_interval: int,
+            n_max_reads: int,
+            patience: int,
+            ):
+        """Same as `train`, but this method assumes that the training set is
+        infinite.
+        """
+        reconstruction_criterion = MSELoss()
+        classification_criterion = CrossEntropyLoss()
+        classification_weight = 0.25
+        # penalty_matrix = create_penalty_matrix(mapping).to(device)
+        losses = [0]
+        average_f_scores = []
+        best_f1 = 0.0
+        n_reads_processed = 0
+        evaluation_countdown = evaluation_interval
+        f1_scores = [1 for _ in range(len(self.mapping))]
+        for x_batch, y_batch in tqdm(train_loader):
+            self.model.train()
+            x_batch = x_batch.long().to(self.device)
+
+            # Swap channels and sequence.
+            B, N = x_batch.shape
+            shifts = tensor([6, 4, 2, 0], device=x_batch.device).view(1, 1, 4)
+            x_expanded = x_batch.unsqueeze(-1)
+            tokens = (x_expanded >> shifts) & 0b11
+            tokens = tokens.view(B, N * 4)
+            one_hot = F.one_hot(tokens, num_classes=4).float()
+            x_batch_one_hot = one_hot.permute(0, 2, 1)
+
+            # Swap channels and sequence.
+            y_batch = y_batch.long().to(self.device)
+            classification, reconstruction = self.model(x_batch)
+            reconstruction_loss = reconstruction_criterion(
+                reconstruction, x_batch_one_hot
+            )
+            classification_loss = classification_criterion(
+                classification, y_batch
+            )
+            loss = (
+                classification_weight * classification_loss
+                + (1 - classification_weight) * reconstruction_loss
+            )
+
+            # loss *= penalized_cross_entropy(output, y_batch, penalty_matrix)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            losses[-1] += loss.item()
+            n_reads_processed += len(y_batch)
+            evaluation_countdown -= len(y_batch)
+            if evaluation_countdown <= 0:
+                evaluation_countdown = evaluation_interval
+                f1 = evaluate(self, validate_loader, self.device, self.mapping, permute=False)
+                f1 = [float(f) for f in f1]
+                average_f_scores.append(f1)
+                if f1[-1] > best_f1:
+                    best_f1 = f1[-1]
+                if f1[-1] < best_f1:
+                    patience -= 1
+                loss_msg = [float(f"{f:.5}") for f in f1]
+                print(
+                    f"N Reads: {n_reads_processed:_}",
+                    f"Loss: {losses[-1]:.2f}.",
+                    f"F1: {loss_msg}.",
+                    f"Patience: {patience}"
+                )
+                losses.append(0)
+                if patience <= 0:
+                    print("The model is overfitting; stopping early.")
+                    break
+                # Adjust data generation
+                matrix = confusion_matrix(self, validate_loader, "cuda", self.mapping, False)
+                f1_scores = get_f1_by_category(matrix)
+                print(f"F1 scores: {f1_scores}")
+                f1_scores = (np.ones(f1_scores.shape) / 2) + ((1 - f1_scores) / 2)
+                frequencies = np.array(f1_scores).astype(float)
+                frequencies /= frequencies.mean()
+                frequencies /= len(frequencies)
+                print(f"Setting distributions: {frequencies}")
+                train_loader.dataset.set_distribution(frequencies)
             if n_reads_processed > n_max_reads:
                 print("Reached the specified maximum number of reads.")
                 break
