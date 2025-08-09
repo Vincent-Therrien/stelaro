@@ -136,7 +136,7 @@ class RandomClassifier(BaseClassifier):
             if n_total_reads > n_max_reads:
                 break
         self.n_classes = n_classes
-        return [], []
+        return [], [], []
 
 
 class MajorityClassifier(BaseClassifier):

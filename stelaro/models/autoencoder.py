@@ -111,6 +111,7 @@ class Classifier(BaseClassifier):
         classification_weight = 0.25
         # penalty_matrix = create_penalty_matrix(mapping).to(device)
         losses = [0]
+        validation_losses = []
         average_f_scores = []
         best_f1 = 0.0
         n_reads_processed = 0
@@ -143,7 +144,7 @@ class Classifier(BaseClassifier):
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            losses[-1] += loss.item()
+            losses[-1] += loss.item() / len(y_batch)
             n_reads_processed += len(y_batch)
             evaluation_countdown -= len(y_batch)
             if evaluation_countdown <= 0:
@@ -163,6 +164,22 @@ class Classifier(BaseClassifier):
                     f"Patience: {patience}"
                 )
                 losses.append(0)
+                validation_losses.append(0)
+                for x_batch, y_batch in validate_loader:
+                    x_batch = x_batch.type(float32).to(self.device)
+                    y_batch = y_batch.long().to(self.device)
+                    classification, reconstruction = self.model(x_batch)
+                    reconstruction_loss = reconstruction_criterion(
+                        reconstruction, x_batch
+                    )
+                    classification_loss = classification_criterion(
+                        classification, y_batch
+                    )
+                    loss = (
+                        classification_weight * classification_loss
+                        + (1 - classification_weight) * reconstruction_loss
+                    )
+                    validation_losses[-1] += loss.item() / len(y_batch)
                 if patience <= 0:
                     print("The model is overfitting; stopping early.")
                     break
@@ -174,7 +191,7 @@ class Classifier(BaseClassifier):
 
         print(f"Processed {n_reads_processed:_} reads.")
         average_f_scores = list(np.array(average_f_scores).T)
-        return losses[:-1], average_f_scores
+        return losses[:-1], average_f_scores, validation_losses
 
 
 class Unsqueeze(Module):
