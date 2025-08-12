@@ -62,12 +62,13 @@ maturin develop
 - [x] Sample synthetic metagenomic samples directly into Numpy arrays from an ID
 - [x] Manipulate phylogenetic trees (GTDB, rustworkx) and matching reference genomes (NCBI).
 - [x] Transform synthetic datasets into compact formats to train neural networks.
-- [ ] Integrate annotation data (CARD, VFDB, BacMet)
-- [ ] Define attention-based architectures and train neural networks (PyTorch).
-- [ ] Mamba networks / RNN / GAN
-- [ ] Train with K-mers instead of onehot encoding
+- [x] Define attention-based architectures and train neural networks (PyTorch).
+- [x] Train with K-mers instead of onehot encoding
 - [x] Virus taxonomy: https://www.ncbi.nlm.nih.gov/labs/virus/vssi/#/virus?SeqType_s=Nucleotide&SourceDB_s=RefSeq
 - [x] Compare smaller NN models
+- [x] Train with adaptive data generation
+- [ ] Make a hybrid sequence / K-mer model
+- [ ] Explain models with weights
 
 
 ## Organization
@@ -88,3 +89,22 @@ python3 ci.py
 ```
 
 This will build all components, run all tests, and validate the coding style.
+
+
+## Comparison with Other Methods
+
+### Datasets
+
+The dataset used by BerTax is available at https://osf.io/qg6mv/. It contains:
+
+- `non_similar_dataset.zip`: Non-similar sequences
+- `similar_data.zip`: Similar sequence (i.e. within the same genera)
+
+Each identifier of the files contained in this dataset is organized as follows:
+
+```
+>`NCBI Taxonomy ID` `ID`
+```
+
+where `NCBI Taxonomy ID` is the species / strain identifier of the genome from which the sequence
+was sampled and `ID` is a project-specific identifier.
