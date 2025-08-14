@@ -164,7 +164,7 @@ def get_assembly_taxid(file: str) -> set[str]:
     Returns: Set of taxonomy identifiers.
     """
     taxIDs = {}
-    with open(file, "r") as f:
+    with open(file, "r", encoding='utf-8') as f:
         next(f)  # Skip the first line.
         next(f)  # Skip the header.
         for line in f:
@@ -205,18 +205,18 @@ def _get_taxonomy_parents(
     return result
 
 
-def get_all_taxonomy_parents(file: str, tax_ids: set[str]) -> tuple:
+def get_all_taxonomy_parents(nodes: str, merged: str) -> tuple:
     """Recursively fetch all parents in the NCBI taxonomy.
 
     Args:
-        file: File path to the `nodes.dmp` file of the NCBI taxonomy,
-        tax_ids: Set of taxonomy IDs to retain.
+        nodes: File path to the `nodes.dmp` file of the NCBI taxonomy.
+        merged: File path to the `merged.dmp` file of the NCBI taxonomy.
 
     Return: A tuple of dict: (parent to children, tax_id to rank)
     """
     id_to_parent = {}
     id_to_rank = {}
-    with open(file, "r") as f:
+    with open(nodes, "r") as f:
         for line in f:
             fields = line.strip().split("\t")
             taxid = fields[TAXONOMY_TAXID_COLUMN]
@@ -224,27 +224,14 @@ def get_all_taxonomy_parents(file: str, tax_ids: set[str]) -> tuple:
             parent = fields[TAXONOMY_PARENT_TAXID_COLUMN]
             id_to_parent[taxid] = parent
             id_to_rank[taxid] = rank
+    with open(merged, "r") as f:
+        for line in f:
+            fields = line.strip().split("\t")
+            taxid = fields[0]
+            if taxid not in id_to_parent:
+                id_to_parent[taxid] = fields[2]
+                id_to_rank[taxid] = "unclassified"
     return id_to_parent, id_to_rank
-    subset = tax_ids
-    parents = {}
-    ranks = {}
-    while True:
-        print(f"Looking for taxonomic parents: {len(subset)}")
-        current_subset = subset.copy()
-        subset = set()
-        for child in current_subset:
-            if child not in id_to_parent:
-                print(f"Reference genome with tax ID {child} has to taxonomy.")
-                continue
-            parent, rank = id_to_parent[child], id_to_rank[child]
-            ranks[child] = rank
-            subset.add(parent)
-            if parent not in parents:
-                parents[parent] = set()
-            parents[parent].add(child)
-        if len(subset) == 1:
-            break
-    return parents, ranks
 
 
 def resolve_taxonomy(
@@ -252,7 +239,7 @@ def resolve_taxonomy(
         ranks: dict,
         tax_ids: set[str],
         names: dict,
-        ) -> tuple[rx.PyDiGraph, dict]:
+        ) -> list:
     """Convert a list of taxIDs into a taxonomic tree.
 
     Args:
@@ -261,8 +248,10 @@ def resolve_taxonomy(
     Returns: A network representing the taxonomy and a dictionary that maps
         taxonomic IDs to node indices.
     """
-    lineages = []
+    lineages = {}
     for taxon in tax_ids:
+        if taxon in lineages:
+            print(f"Taxon {taxon} is already included.")
         lineage = []
         index = taxon
         if taxon not in parents:
@@ -284,7 +273,7 @@ def resolve_taxonomy(
                 break
             index = parents[index]
         lineage = [e for e in reversed(lineage)]
-        lineages.append(lineage)
+        lineages[taxon] = lineage
     return lineages
 
 
