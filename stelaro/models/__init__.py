@@ -7,7 +7,7 @@
     - License: MIT
 """
 
-from random import randint
+from random import randint, shuffle
 import numpy as np
 from sklearn.metrics import f1_score
 from torch import tensor, no_grad, float32, Tensor, zeros, from_numpy
@@ -33,6 +33,50 @@ class SyntheticReadDataset(Dataset):
     def __getitem__(self, idx):
         x = self.x[idx]
         x = ((x[:, None] & (1 << (3 - np.arange(4)))) > 0).astype(float)
+        y = self.y[idx]
+        return tensor(x), tensor(y)
+
+
+class SyntheticTetramerDataset(Dataset):
+    """Dataset containing one-hot encoded synthetic reads."""
+    def __init__(self, directory: str, mapping: str = None, balance=False):
+        """Args:
+            directory: Path of the directory that contains the x and y files.
+            mapping: Either `None` (all in main memory) or `"r"`
+                (memory-mapped, useful for very large datasets).
+        """
+        if balance:
+            x = np.load(directory + "x.npy", mmap_mode=mapping)
+            y = np.load(directory + "y.npy", mmap_mode=mapping)
+            unique_values, counts = np.unique(y, return_counts = True)
+            n = min(counts)
+            N = n * len(unique_values)
+            self.x = np.zeros((N, 375), dtype=np.uint8)
+            self.y = np.zeros(N, dtype=np.uint16)
+            indices = list(range(len(y)))
+            shuffle(indices)
+            amounts = {}
+            for v in unique_values:
+                amounts[v] = 0
+            i = 0
+            for index in indices:
+                label = y[index]
+                if amounts[label] < n:
+                    self.x[i] = x[index]
+                    self.y[i] = label
+                    i += 1
+                    amounts[label] += 1
+                    if i >= N:
+                        break
+        else:
+            self.x = np.load(directory + "x.npy", mmap_mode=mapping)
+            self.y = np.load(directory + "y.npy", mmap_mode=mapping)
+
+    def __len__(self):
+        return len(self.y)
+
+    def __getitem__(self, idx):
+        x = self.x[idx]
         y = self.y[idx]
         return tensor(x), tensor(y)
 
@@ -108,10 +152,11 @@ class RandomClassifier(BaseClassifier):
             optimizer,
             max_n_epochs: int,
             patience: int,
+            permute: bool,
             ):
         n_classes = 0
         for _, y_batch in tqdm(train_loader):
-            n = max(y_batch)
+            n = max(y_batch.long())
             if n > n_classes:
                 n_classes = n
         self.n_classes = n_classes
@@ -253,7 +298,7 @@ def evaluate(classifier, loader, device, mapping, permute=True):
     n_batches = 0
     with no_grad():
         for x_batch, y_batch in loader:
-            x_batch = x_batch.type(float32).to(device)
+            x_batch = x_batch.long().to(device)
             if permute:
                 x_batch = x_batch.permute(0, 2, 1)  # Swap channels and sequence.
             y_batch = y_batch.to("cpu")

@@ -8,7 +8,7 @@
 """
 
 import numpy as np
-from torch import argmax, float32
+from torch import argmax, float32, bincount, cat
 from torch.nn import (Module, Conv1d, ReLU, Sequential, Flatten, Linear,
                       CrossEntropyLoss, Dropout, MaxPool1d)
 from torch.utils.data import DataLoader
@@ -38,20 +38,31 @@ class Classifier(BaseClassifier):
             optimizer,
             max_n_epochs: int,
             patience: int,
+            permute: bool = True,
             ):
         criterion = CrossEntropyLoss()
         # penalty_matrix = create_penalty_matrix(mapping).to(device)
         losses = []
         average_f_scores = []
         best_f1 = 0.0
+        # all_labels = cat([labels for _, labels in train_loader]).long()
+        # class_counts = bincount(all_labels, minlength=max(all_labels) + 1)
+        # class_weights = 1.0 / class_counts.float()
+        # class_weights = class_weights.float()
+        # criterion = CrossEntropyLoss(weight=class_weights.to(self.device)).float()
         for epoch in range(max_n_epochs):
             self.model.train()
             losses.append(0)
+            n_processed = 0
             for x_batch, y_batch in tqdm(train_loader):
-                x_batch = x_batch.type(float32).to(self.device)
+                x_batch = x_batch.to(self.device)
                 # Swap channels and sequence.
-                x_batch = x_batch.permute(0, 2, 1)
+                if permute:
+                    x_batch = x_batch.permute(0, 2, 1)
                 y_batch = y_batch.long().to(self.device)
+                #class_counts = bincount(y_batch, minlength=31)
+                #print(class_counts)
+                #raise RuntimeError
                 output = self.model(x_batch)
                 loss = criterion(output, y_batch)
                 # loss *= penalized_cross_entropy(output, y_batch, penalty_matrix)
@@ -59,7 +70,10 @@ class Classifier(BaseClassifier):
                 loss.backward()
                 optimizer.step()
                 losses[-1] += loss.item()
-            f1 = evaluate(self, validate_loader, self.device, self.mapping)
+                #n_processed += len(y_batch)
+                #if n_processed > 1_000_000:
+                #    break
+            f1 = evaluate(self, validate_loader, self.device, self.mapping, permute=permute)
             f1 = [float(f) for f in f1]
             average_f_scores.append(f1)
             if f1[-1] > best_f1:

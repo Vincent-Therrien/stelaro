@@ -44,6 +44,7 @@ class Classifier(BaseClassifier):
             optimizer,
             max_n_epochs: int,
             patience: int,
+            permute: bool=False,
             ):
         reconstruction_criterion = MSELoss()
         classification_criterion = CrossEntropyLoss()
@@ -57,11 +58,21 @@ class Classifier(BaseClassifier):
             for x_batch, y_batch in tqdm(train_loader):
                 x_batch = x_batch.type(float32).to(self.device)
                 # Swap channels and sequence.
-                x_batch = x_batch.permute(0, 2, 1)
+                if permute:
+                    x_batch = x_batch.permute(0, 2, 1)
                 y_batch = y_batch.long().to(self.device)
                 classification, reconstruction = self.model(x_batch)
+
+                B, N = x_batch.shape
+                shifts = tensor([6, 4, 2, 0], device=x_batch.device).view(1, 1, 4)
+                x_expanded = x_batch.unsqueeze(-1).to(int)
+                tokens = (x_expanded >> shifts) & 0b11
+                tokens = tokens.view(B, N * 4)
+                one_hot = F.one_hot(tokens, num_classes=4).float()
+                onehot_batch = one_hot.permute(0, 2, 1)
+
                 reconstruction_loss = reconstruction_criterion(
-                    reconstruction, x_batch
+                    reconstruction, onehot_batch
                 )
                 classification_loss = classification_criterion(
                     classification, y_batch
@@ -74,7 +85,7 @@ class Classifier(BaseClassifier):
                 loss.backward()
                 optimizer.step()
                 losses[-1] += loss.item()
-            f1 = evaluate(self, validate_loader, self.device, self.mapping)
+            f1 = evaluate(self, validate_loader, self.device, self.mapping, permute)
             f1 = [float(f) for f in f1]
             average_f_scores.append(f1)
             if f1[-1] > best_f1:
