@@ -178,7 +178,6 @@ class RandomClassifier(BaseClassifier):
             optimizer,
             max_n_epochs: int,
             patience: int,
-            permute: bool,
             ):
         n_classes = 0
         for _, y_batch in tqdm(train_loader):
@@ -186,7 +185,7 @@ class RandomClassifier(BaseClassifier):
             if n > n_classes:
                 n_classes = n
         self.n_classes = n_classes
-        return [], []
+        return [], [], []
 
     def train_large_dataset(
             self,
@@ -317,7 +316,7 @@ def rank_based_f1_score(
     return f
 
 
-def evaluate(classifier, loader, device, mapping, permute=True):
+def evaluate(classifier, loader, device, mapping):
     """Evaluate the F1 score at different taxonomic levels."""
     mappings = obtain_rank_based_mappings(mapping)
     ranks = []
@@ -325,8 +324,6 @@ def evaluate(classifier, loader, device, mapping, permute=True):
     with no_grad():
         for x_batch, y_batch in loader:
             x_batch = x_batch.long().to(device)
-            if permute:
-                x_batch = x_batch.permute(0, 2, 1)  # Swap channels and sequence.
             y_batch = y_batch.to("cpu")
             predictions = classifier.predict(x_batch)
             ranks.append(rank_based_f1_score(mappings, y_batch, predictions))
@@ -344,14 +341,12 @@ def evaluate(classifier, loader, device, mapping, permute=True):
     return collapsed_ranks
 
 
-def confusion_matrix(classifier, loader, device, mapping, permute=True) -> np.ndarray:
+def confusion_matrix(classifier, loader, device, mapping) -> np.ndarray:
     """Returns: A confusion matrix with rows corresponding to true labels."""
     matrix = np.zeros((len(mapping), len(mapping)))
     with no_grad():
         for x_batch, y_batch in loader:
-            x_batch = x_batch.type(float32).to(device)
-            if permute:
-                x_batch = x_batch.permute(0, 2, 1)  # Swap channels and sequence.
+            x_batch = x_batch.long().to(device)
             y_batch = y_batch.to("cpu")
             predictions = classifier.predict(x_batch)
             for y, p in zip(y_batch, predictions):

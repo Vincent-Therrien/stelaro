@@ -7,7 +7,7 @@
     - License: MIT
 """
 
-from torch import Tensor, tensor, stack, zeros_like
+from torch import Tensor, tensor
 from torch.nn.functional import one_hot
 
 
@@ -65,7 +65,7 @@ def decode_tetramer(sequence: list[int]) -> str:
     return "".join([decode_integer(i) for i in sequence])
 
 
-def tetramer_batch_to_digits(batch: Tensor) -> list[list[int]]:
+def tetramer_batch_to_digits(batch: Tensor) -> Tensor:
     """Convert a batch of tetramer-encoded reads into a digit batch.
 
     Args:
@@ -92,7 +92,7 @@ def decode_digits(digits: list[int]) -> str:
     return "".join(["ACGT"[digit] for digit in digits])
 
 
-def tetramer_batch_to_onehot(batch: Tensor) -> list[list[int]]:
+def tetramer_batch_to_onehot(batch: Tensor) -> Tensor:
     """Convert a batch of tetramer-encoded reads into a onehot batch.
 
     Args:
@@ -116,7 +116,7 @@ def decode_onehot(onehot: list[int]) -> str:
     return "".join(["ACGT"[digit] for digit in digits])
 
 
-def tetramer_batch_to_codons(batch: Tensor) -> list[list[int]]:
+def tetramer_batch_to_codons(batch: Tensor) -> Tensor:
     """Convert a batch of tetramer-encoded reads into a 3-mer batch.
 
     Args:
@@ -148,3 +148,48 @@ def decode_codons(codons: list[int]) -> str:
     onehot = tokens.view(B, N * 3)[0]
     print(onehot)
     return "".join (["ACGT"[digit] for digit in onehot])
+
+
+def to_channels(batch: Tensor) -> Tensor:
+    """Transform a tetramer encoding into a onehot format expected by CNNs.
+
+    Args:
+        batch: A batch of tetramer-encoded sequences.
+
+    Returns: Onehot encoded batch.
+    """
+    onehot = tetramer_batch_to_onehot(batch)
+    return onehot.permute(0, 2, 1).float()
+
+
+def to_tetramers(batch: Tensor) -> Tensor:
+    """Identity operator.
+
+    Args:
+        batch: A batch of tetramer-encoded sequences.
+
+    Returns: Tetramer batch.
+    """
+    return batch
+
+
+def to_codons(batch: Tensor) -> Tensor:
+    """Transform a tetramer encoding into a codon encoding.
+
+    Args:
+        batch: A batch of tetramer-encoded sequences.
+
+    Returns: Codon batch.
+    """
+    return tetramer_batch_to_codons(batch)
+
+
+def to_digits(batch: Tensor) -> Tensor:
+    """Transform a tetramer encoding into a digit encoding.
+
+    Args:
+        batch: A batch of tetramer-encoded sequences.
+
+    Returns: Digit batch.
+    """
+    return tetramer_batch_to_digits(batch)

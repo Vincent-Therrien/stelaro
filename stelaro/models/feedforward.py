@@ -7,6 +7,7 @@
     - License: MIT
 """
 
+from typing import Callable
 import numpy as np
 from torch import argmax, float32, bincount, cat, exp
 from torch.nn import (Module, Conv1d, ReLU, Sequential, Flatten, Linear,
@@ -26,16 +27,25 @@ def focal_loss(inputs, targets, alpha=1, gamma=2):
 
 class Classifier(BaseClassifier):
     """A DNA read classification dataset."""
-    def __init__(self, length, mapping, device, model):
+    def __init__(
+            self,
+            length: int,
+            mapping: dict,
+            device: str,
+            model: any,
+            formatter: Callable
+            ):
         self.model = model(length, len(mapping)).to(device)
         self.device = device
         self.mapping = mapping
+        self.formatter = formatter
 
     def get_parameters(self):
         return self.model.parameters()
 
     def predict(self, x_batch):
         self.model.eval()
+        x_batch = self.formatter(x_batch)
         predictions = argmax(self.model(x_batch), dim=1).to("cpu")
         return predictions
 
@@ -46,7 +56,6 @@ class Classifier(BaseClassifier):
             optimizer,
             max_n_epochs: int,
             patience: int,
-            permute: bool = True,
             ):
         losses = []
         validation_losses = []
@@ -58,8 +67,7 @@ class Classifier(BaseClassifier):
             losses.append(0)
             for x_batch, y_batch in tqdm(train_loader):
                 x_batch = x_batch.long().to(self.device)
-                if permute:
-                    x_batch = x_batch.permute(0, 2, 1)
+                x_batch = self.formatter(x_batch)
                 y_batch = y_batch.long().to(self.device)
                 output = self.model(x_batch)
                 loss = criterion(output, y_batch)
@@ -70,11 +78,12 @@ class Classifier(BaseClassifier):
             validation_losses.append(0)
             for x_batch, y_batch in validate_loader:
                 x_batch = x_batch.long().to(self.device)
+                x_batch = self.formatter(x_batch)
                 y_batch = y_batch.long().to(self.device)
                 output = self.model(x_batch)
                 loss = criterion(output, y_batch)
                 validation_losses[-1] += loss.item() / len(y_batch)
-            f1 = evaluate(self, validate_loader, self.device, self.mapping, permute=permute)
+            f1 = evaluate(self, validate_loader, self.device, self.mapping)
             f1 = [float(f) for f in f1]
             average_f_scores.append(f1)
             if f1[-1] > best_f1:
