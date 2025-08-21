@@ -81,6 +81,32 @@ class SyntheticTetramerDataset(Dataset):
         return tensor(x), tensor(y)
 
 
+class SyntheticTetramerDataset_2(Dataset):
+    """Dataset containing one-hot encoded synthetic reads."""
+    def __init__(self, directory: str, mapping: str = None, indices=None):
+        """Args:
+            directory: Path of the directory that contains the x and y files.
+            mapping: Either `None` (all in main memory) or `"r"`
+                (memory-mapped, useful for very large datasets).
+        """
+        x = np.load(directory + "x.npy")
+        y = np.load(directory + "y.npy")
+        N = len(indices)
+        self.x = np.zeros((N, 375), dtype=np.uint8)
+        self.y = np.zeros(N, dtype=np.uint16)
+        for i, index in enumerate(indices):
+            self.x[i] = x[index]
+            self.y[i] = y[index]
+
+    def __len__(self):
+        return len(self.y)
+
+    def __getitem__(self, idx):
+        x = self.x[idx]
+        y = self.y[idx]
+        return tensor(x), tensor(y)
+
+
 class BasicReadDataset(Dataset):
     """Dataset containing one-hot encoded synthetic reads."""
     def __init__(self, x, y):

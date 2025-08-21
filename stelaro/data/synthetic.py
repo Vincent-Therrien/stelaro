@@ -15,7 +15,6 @@ from . import read_genome
 from torch import tensor
 from torch.utils.data import Dataset
 
-
 NUCLEOTIDE_TO_ONEHOT = {
     'A': 0b1000,
     'C': 0b0100,
@@ -26,44 +25,6 @@ NUCLEOTIDE_TO_ONEHOT = {
 ONEHOT_TO_NUCLEOTIDE = {v: k for k, v in NUCLEOTIDE_TO_ONEHOT.items()}
 SEQUENCE_TO_SAMPLE_MINIMUM_LENGTH_RATIO = 1.5
 MAXIMUM_UNDEFINED_FRACTION = 0.05
-
-
-def encode_tetramer(sequence: str) -> list[int]:
-    if any(base not in 'ACGT' for base in sequence):
-        raise ValueError("Input must be a 4-character string containing only A, C, G, T.")
-    base_to_bits = {
-        'A': 0b00,
-        'C': 0b01,
-        'G': 0b10,
-        'T': 0b11,
-    }
-
-    def encode_four_nucleotides(tetramer):
-        result = 0
-        for base in tetramer:
-            result = (result << 2) | base_to_bits[base]
-        return result
-
-    tetramers = [sequence[i:i+4] for i in range(0, len(sequence), 4)]
-    return [encode_four_nucleotides(t) for t in tetramers]
-
-
-def decode_tetramer(sequence: list[int]) -> str:
-    bits_to_base = {
-        0b00: 'A',
-        0b01: 'C',
-        0b10: 'G',
-        0b11: 'T'
-    }
-
-    def decode_integer(integer):
-        tetramer = ''
-        for shift in (6, 4, 2, 0):
-            two_bits = (integer >> shift) & 0b11
-            tetramer += bits_to_base[two_bits]
-        return tetramer
-
-    return "".join([decode_integer(i) for i in sequence])
 
 
 def find_index_from_label(
@@ -105,11 +66,6 @@ def sample_read(
         else:
             raise RuntimeError(f"Could not generate an acceptable read.")
     return samples
-
-
-def decode(sequence: list[int]) -> str:
-    characters = [ONEHOT_TO_NUCLEOTIDE[s] for s in sequence]
-    return "".join(characters)
 
 
 def write(
@@ -322,7 +278,7 @@ def compress_dataset(
                         if len(read) != read_length:
                             continue
                         try:
-                            encoding = encode_tetramer(read)
+                            encoding = format.encode_tetramer(read)
                             x[array_index] = encoding
                             y[array_index] = index
                             array_index += 1
