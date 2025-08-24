@@ -71,10 +71,12 @@ class Classifier(BaseClassifier):
                 y_batch = y_batch.long().to(self.device)
                 output = self.model(x_batch)
                 loss = criterion(output, y_batch)
+                # loss *= penalized_cross_entropy(output, y_batch, penalty_matrix)
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
-                losses[-1] += loss.item() / len(y_batch)
+                losses[-1] += loss.item()
+            losses[-1] /= len(train_loader.dataset)
             validation_losses.append(0)
             for x_batch, y_batch in validate_loader:
                 x_batch = x_batch.long().to(self.device)
@@ -82,7 +84,8 @@ class Classifier(BaseClassifier):
                 y_batch = y_batch.long().to(self.device)
                 output = self.model(x_batch)
                 loss = criterion(output, y_batch)
-                validation_losses[-1] += loss.item() / len(y_batch)
+                validation_losses[-1] += loss.item()
+            validation_losses[-1] /= len(validate_loader.dataset)
             f1 = evaluate(self, validate_loader, self.device, self.mapping)
             f1 = [float(f) for f in f1]
             average_f_scores.append(f1)
@@ -93,7 +96,8 @@ class Classifier(BaseClassifier):
             loss_msg = [float(f"{f:.5}") for f in f1]
             print(
                 f"{epoch+1}/{max_n_epochs}",
-                f"Loss: {losses[-1]:.2f}.",
+                f"T loss: {losses[-1]:.5f}.",
+                f"V loss: {validation_losses[-1]:.5f}.",
                 f"F1: {loss_msg}.",
                 f"Patience: {patience}"
             )

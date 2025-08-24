@@ -7,6 +7,7 @@
     - License: MIT
 """
 
+from typing import Callable
 import numpy as np
 from torch import (argmax, float32, randn_like, bernoulli, ones_like,
                    rand_like, clamp, tensor)
@@ -19,20 +20,33 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from . import evaluate, BaseClassifier
+from stelaro.data import format
 
 
 class Classifier(BaseClassifier):
     """A non-variational autoencoder-based DNA read classifier."""
-    def __init__(self, length, mapping, device, model):
+    def __init__(
+            self,
+            length: int,
+            mapping: dict,
+            device: str,
+            model: any,
+            formatter: Callable,
+            classifier_weight: float = 0.5
+            ):
         self.model = model(length, len(mapping)).to(device)
         self.device = device
         self.mapping = mapping
+        self.formatter = formatter
+        assert 0 <= classifier_weight <= 1, "Weight must lie within (0, 1)."
+        self.classifier_weight = classifier_weight
 
     def get_parameters(self):
         return self.model.parameters()
 
     def predict(self, x_batch):
         self.model.eval()
+        x_batch = self.formatter(x_batch)
         logits, _ = self.model(x_batch)
         predictions = argmax(logits, dim=1).to("cpu")
         return predictions
@@ -44,48 +58,56 @@ class Classifier(BaseClassifier):
             optimizer,
             max_n_epochs: int,
             patience: int,
-            permute: bool=False,
             ):
         reconstruction_criterion = MSELoss()
-        classification_criterion = CrossEntropyLoss()
-        classification_weight = 0.25
+        classification_criterion = CrossEntropyLoss(label_smoothing=0.1)
+
+        def compute_loss(real_x, reconstructed_x, real_y, predicted_y):
+            reconstruction_loss = reconstruction_criterion(
+                reconstructed_x, real_x
+            )
+            classification_loss = classification_criterion(
+                predicted_y, real_y
+            )
+            return (
+                self.classifier_weight * classification_loss
+                + (1 - self.classifier_weight) * reconstruction_loss
+            )
+
         losses = []
+        validation_losses = []
         average_f_scores = []
         best_f1 = 0.0
         for epoch in range(max_n_epochs):
             self.model.train()
             losses.append(0)
             for x_batch, y_batch in tqdm(train_loader):
-                x_batch = x_batch.type(float32).to(self.device)
-                # Swap channels and sequence.
-                if permute:
-                    x_batch = x_batch.permute(0, 2, 1)
+                onehot_batch = format.to_channels(x_batch).to(self.device)
+                x_batch = x_batch.long().to(self.device)
+                x_batch = self.formatter(x_batch)
                 y_batch = y_batch.long().to(self.device)
                 classification, reconstruction = self.model(x_batch)
-
-                B, N = x_batch.shape
-                shifts = tensor([6, 4, 2, 0], device=x_batch.device).view(1, 1, 4)
-                x_expanded = x_batch.unsqueeze(-1).to(int)
-                tokens = (x_expanded >> shifts) & 0b11
-                tokens = tokens.view(B, N * 4)
-                one_hot = F.one_hot(tokens, num_classes=4).float()
-                onehot_batch = one_hot.permute(0, 2, 1)
-
-                reconstruction_loss = reconstruction_criterion(
-                    reconstruction, onehot_batch
-                )
-                classification_loss = classification_criterion(
-                    classification, y_batch
-                )
-                loss = (
-                    classification_weight * classification_loss
-                    + (1 - classification_weight) * reconstruction_loss
+                loss = compute_loss(
+                    onehot_batch, reconstruction, y_batch, classification
                 )
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
                 losses[-1] += loss.item()
-            f1 = evaluate(self, validate_loader, self.device, self.mapping, permute)
+            losses[-1] /= len(train_loader.dataset)
+            validation_losses.append(0)
+            for x_batch, y_batch in validate_loader:
+                onehot_batch = format.to_channels(x_batch).to(self.device)
+                x_batch = x_batch.long().to(self.device)
+                x_batch = self.formatter(x_batch)
+                y_batch = y_batch.long().to(self.device)
+                classification, reconstruction = self.model(x_batch)
+                loss = compute_loss(
+                    onehot_batch, reconstruction, y_batch, classification
+                )
+                validation_losses[-1] += loss.item()
+            validation_losses[-1] /= len(validate_loader.dataset)
+            f1 = evaluate(self, validate_loader, self.device, self.mapping)
             f1 = [float(f) for f in f1]
             average_f_scores.append(f1)
             if f1[-1] > best_f1:
@@ -95,7 +117,8 @@ class Classifier(BaseClassifier):
             loss_msg = [float(f"{f:.5}") for f in f1]
             print(
                 f"{epoch+1}/{max_n_epochs}",
-                f"Loss: {losses[-1]:.2f}.",
+                f"T loss: {losses[-1]:.5f}.",
+                f"V loss: {validation_losses[-1]:.5f}.",
                 f"F1: {loss_msg}.",
                 f"Patience: {patience}"
             )
@@ -103,7 +126,7 @@ class Classifier(BaseClassifier):
                 print("The model is overfitting; stopping early.")
                 break
         average_f_scores = list(np.array(average_f_scores).T)
-        return losses, average_f_scores
+        return losses, average_f_scores, validation_losses
 
     def train_large_dataset(
             self,
