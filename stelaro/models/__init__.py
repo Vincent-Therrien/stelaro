@@ -81,22 +81,108 @@ class SyntheticTetramerDataset(Dataset):
         return tensor(x), tensor(y)
 
 
-class SyntheticTetramerDataset_2(Dataset):
+class SyntheticMultiLevelTetramerDataset(Dataset):
     """Dataset containing one-hot encoded synthetic reads."""
-    def __init__(self, directory: str, mapping: str = None, indices=None):
+    def __init__(
+            self,
+            directory: str,
+            mapping: dict,
+            selection: tuple[str],
+            resolution: int,
+            memory_mapping: str = None,
+            balance: bool = False,
+            other_factor: float = 2.0,
+        ):
         """Args:
             directory: Path of the directory that contains the x and y files.
-            mapping: Either `None` (all in main memory) or `"r"`
+            mapping: Dictionary mapping indices to taxa.
+            selection: Taxonomic group to select within the mapping.
+            resolution: Number of ranks to discriminate.
+            memory_mapping: Either `None` (all in main memory) or `"r"`
                 (memory-mapped, useful for very large datasets).
+            balance: If True, randomly eliminate data from the majority class
+                until it comprises at most twice the number of data points from
+                the second biggest class.
+            other_factor: Adjusts balancing by determining the maximum number
+                of data points in the other class as a factor of the number
+                of data points in the second biggest class.
         """
-        x = np.load(directory + "x.npy")
-        y = np.load(directory + "y.npy")
-        N = len(indices)
-        self.x = np.zeros((N, 375), dtype=np.uint8)
-        self.y = np.zeros(N, dtype=np.uint16)
-        for i, index in enumerate(indices):
-            self.x[i] = x[index]
-            self.y[i] = y[index]
+        self.mapping = mapping
+        self.selection = selection
+        self.conversion_table = tensor([i for i in range(len(self.mapping))])
+        n_levels = resolution if resolution else len(self.mapping[str(0)])
+        # Select a taxon.
+        if selection:
+            assert type(selection) is tuple, "Unexpected type."
+            n_taxa = 0
+            for i in range(len(self.mapping)):
+                observation = self.mapping[str(i)]
+                for level in range(len(selection)):
+                    if level >= len(selection):
+                        pass
+                    elif selection[level] != observation[level]:
+                        self.conversion_table[i] = -1
+                        break
+                else:
+                    self.conversion_table[i] = n_taxa
+                    n_taxa += 1
+        # Adjust the resolution.
+        taxa = {}
+        if resolution:
+            for i in range(len(self.mapping)):
+                if self.conversion_table[i] != -1:
+                    observation = self.mapping[str(i)]
+                    level = tuple(observation)[:len(selection) + n_levels]
+                    if level not in taxa:
+                        taxa[level] = len(taxa)
+                    self.conversion_table[i] = taxa[level]
+        self.target_mapping = taxa
+        self.target_mapping[("other", )] = len(taxa)
+        # Replace wildcards.
+        for i in range(len(self.mapping)):
+            if self.conversion_table[i] == -1:
+                self.conversion_table[i] = n_taxa
+        if balance:
+            self.balance(directory, memory_mapping, other_factor)
+        else:
+            self.x = np.load(directory + "x.npy", mmap_mode=memory_mapping)
+            self.y = np.load(directory + "y.npy", mmap_mode=memory_mapping)
+            self.y = self.conversion_table[self.y]
+
+    def balance(
+            self,
+            directory: str,
+            memory_mapping: str,
+            other_factor: float
+            ):
+        x = np.load(directory + "x.npy", mmap_mode=memory_mapping)
+        y = np.load(directory + "y.npy", mmap_mode=memory_mapping)
+        y = self.conversion_table[y]
+        unique_values, counts = np.unique(y, return_counts = True)
+        second_biggest = sorted(counts, reverse=True)[1]
+        N = int(second_biggest * other_factor)
+        total_points = 0
+        for count in counts:
+            if count < N:
+                total_points += count
+            else:
+                total_points += N
+        L = len(x[0])
+        self.x = np.zeros((total_points, L), dtype=np.uint8)
+        self.y = np.zeros(total_points, dtype=np.uint16)
+        indices = list(range(len(y)))
+        shuffle(indices)
+        amounts = {}
+        for v in unique_values:
+            amounts[v] = 0
+        i = 0
+        for index in indices:
+            label = int(y[index])
+            if amounts[label] < N:
+                self.x[i] = x[index]
+                self.y[i] = label
+                i += 1
+                amounts[label] += 1
 
     def __len__(self):
         return len(self.y)
