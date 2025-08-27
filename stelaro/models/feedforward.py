@@ -14,10 +14,10 @@ from torch.nn import (Module, Conv1d, ReLU, Sequential, Flatten, Linear,
                       CrossEntropyLoss, Dropout, MaxPool1d)
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from . import evaluate, BaseClassifier
-
+from . import evaluate, evaluate_precision, BaseClassifier
 
 from torch.nn.functional import cross_entropy
+
 
 def focal_loss(inputs, targets, alpha=1, gamma=2):
     ce_loss = cross_entropy(inputs, targets, reduction='none')
@@ -35,6 +35,7 @@ class Classifier(BaseClassifier):
             model: any,
             formatter: Callable
             ):
+        self.length = length
         self.model = model(length, len(mapping)).to(device)
         self.device = device
         self.mapping = mapping
@@ -61,7 +62,7 @@ class Classifier(BaseClassifier):
         validation_losses = []
         average_f_scores = []
         best_f1 = 0.0
-        criterion = CrossEntropyLoss(label_smoothing=0.1)
+        criterion = CrossEntropyLoss()
         for epoch in range(max_n_epochs):
             self.model.train()
             losses.append(0)
@@ -77,6 +78,7 @@ class Classifier(BaseClassifier):
                 optimizer.step()
                 losses[-1] += loss.item()
             losses[-1] /= len(train_loader.dataset)
+            losses[-1] *= self.length
             validation_losses.append(0)
             for x_batch, y_batch in validate_loader:
                 x_batch = x_batch.long().to(self.device)
@@ -86,19 +88,24 @@ class Classifier(BaseClassifier):
                 loss = criterion(output, y_batch)
                 validation_losses[-1] += loss.item()
             validation_losses[-1] /= len(validate_loader.dataset)
+            validation_losses[-1] *= self.length
             f1 = evaluate(self, validate_loader, self.device, self.mapping)
             f1 = [float(f) for f in f1]
+            f1_msg = [float(f"{f:.5}") for f in f1]
             average_f_scores.append(f1)
             if f1[-1] > best_f1:
                 best_f1 = f1[-1]
             if f1[-1] < best_f1:
                 patience -= 1
-            loss_msg = [float(f"{f:.5}") for f in f1]
+            ps = evaluate_precision(self, validate_loader, self.device, self.mapping)
+            ps = [float(p) for p in ps]
+            p_msg = [float(f"{p:.5}") for p in ps]
             print(
                 f"{epoch+1}/{max_n_epochs}",
                 f"T loss: {losses[-1]:.5f}.",
                 f"V loss: {validation_losses[-1]:.5f}.",
-                f"F1: {loss_msg}.",
+                f"F1: {f1_msg}.",
+                f"P: {p_msg}",
                 f"Patience: {patience}"
             )
             if patience <= 0:

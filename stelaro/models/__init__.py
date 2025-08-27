@@ -9,7 +9,7 @@
 
 from random import randint, shuffle
 import numpy as np
-from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score, precision_score
 from torch import tensor, no_grad, float32, Tensor, zeros, from_numpy
 from torch.nn import functional
 from torch.utils.data import Dataset, DataLoader
@@ -107,16 +107,15 @@ class SyntheticMultiLevelTetramerDataset(Dataset):
                 of data points in the other class as a factor of the number
                 of data points in the second biggest class.
         """
-        self.mapping = mapping
         self.selection = selection
-        self.conversion_table = tensor([i for i in range(len(self.mapping))])
-        n_levels = resolution if resolution else len(self.mapping[str(0)])
+        self.conversion_table = tensor([i for i in range(len(mapping))])
+        n_levels = resolution if resolution else len(mapping[str(0)])
         # Select a taxon.
         if selection:
             assert type(selection) is tuple, "Unexpected type."
             n_taxa = 0
-            for i in range(len(self.mapping)):
-                observation = self.mapping[str(i)]
+            for i in range(len(mapping)):
+                observation = mapping[str(i)]
                 for level in range(len(selection)):
                     if level >= len(selection):
                         pass
@@ -129,17 +128,20 @@ class SyntheticMultiLevelTetramerDataset(Dataset):
         # Adjust the resolution.
         taxa = {}
         if resolution:
-            for i in range(len(self.mapping)):
+            for i in range(len(mapping)):
                 if self.conversion_table[i] != -1:
-                    observation = self.mapping[str(i)]
+                    observation = mapping[str(i)]
                     level = tuple(observation)[:len(selection) + n_levels]
                     if level not in taxa:
                         taxa[level] = len(taxa)
                     self.conversion_table[i] = taxa[level]
         self.target_mapping = taxa
-        self.target_mapping[("other", )] = len(taxa)
+        if other_factor:
+            self.target_mapping[("other", )] = len(taxa)
+        self.mapping = {str(v): k for k, v in self.target_mapping.items()}
+        self.n_classes = len(taxa)
         # Replace wildcards.
-        for i in range(len(self.mapping)):
+        for i in range(len(mapping)):
             if self.conversion_table[i] == -1:
                 self.conversion_table[i] = n_taxa
         if balance:
@@ -159,8 +161,12 @@ class SyntheticMultiLevelTetramerDataset(Dataset):
         y = np.load(directory + "y.npy", mmap_mode=memory_mapping)
         y = self.conversion_table[y]
         unique_values, counts = np.unique(y, return_counts = True)
-        second_biggest = sorted(counts, reverse=True)[1]
-        N = int(second_biggest * other_factor)
+        if other_factor:
+            second_biggest = sorted(counts, reverse=True)[1]
+            N = int(second_biggest * other_factor)
+        else:
+            n = min(counts)
+            N = n * 4
         total_points = 0
         for count in counts:
             if count < N:
@@ -188,9 +194,9 @@ class SyntheticMultiLevelTetramerDataset(Dataset):
         return len(self.y)
 
     def __getitem__(self, idx):
-        x = self.x[idx]
-        y = self.y[idx]
-        return tensor(x), tensor(y)
+        # x = self.x[idx]
+        # y = self.y[idx]
+        return self.x[idx], self.y[idx]
 
 
 class BasicReadDataset(Dataset):
@@ -402,6 +408,27 @@ def rank_based_f1_score(
     return f
 
 
+def rank_based_precision(
+        mappings: dict, target: list[int], predictions: list[int]
+        ) -> list[np.ndarray]:
+    """Evaluate F1 score at multiple taxonomic ranks."""
+    p = []
+    for mapping in mappings:
+        labels = list(set(mapping.values()))
+        normalized_target = [mapping[int(v)] for v in list(target)]
+        normalized_pred = [mapping[int(v)] for v in list(predictions)]
+        p.append(
+            precision_score(
+                normalized_target,
+                normalized_pred,
+                average=None,
+                labels=labels,
+                zero_division=0.0
+            )
+        )
+    return p
+
+
 def evaluate(classifier, loader, device, mapping):
     """Evaluate the F1 score at different taxonomic levels."""
     mappings = obtain_rank_based_mappings(mapping)
@@ -413,6 +440,31 @@ def evaluate(classifier, loader, device, mapping):
             y_batch = y_batch.to("cpu")
             predictions = classifier.predict(x_batch)
             ranks.append(rank_based_f1_score(mappings, y_batch, predictions))
+            n_batches += 1
+    collapsed_ranks = [np.zeros(len(r)) for r in ranks[0]]
+    for rank in ranks:
+        for i, result in enumerate(rank):
+            collapsed_ranks[i] += result
+    for i in range(len(collapsed_ranks)):
+        collapsed_ranks[i] = np.mean(collapsed_ranks[i])
+        collapsed_ranks[i] /= n_batches
+    collapsed_ranks = [r for r in reversed(collapsed_ranks)]
+    for i in range(len(collapsed_ranks) - 1):
+        assert collapsed_ranks[i] > collapsed_ranks[i + 1]
+    return collapsed_ranks
+
+
+def evaluate_precision(classifier, loader, device, mapping):
+    """Evaluate the precision score at different taxonomic levels."""
+    mappings = obtain_rank_based_mappings(mapping)
+    ranks = []
+    n_batches = 0
+    with no_grad():
+        for x_batch, y_batch in loader:
+            x_batch = x_batch.long().to(device)
+            y_batch = y_batch.to("cpu")
+            predictions = classifier.predict(x_batch)
+            ranks.append(rank_based_precision(mappings, y_batch, predictions))
             n_batches += 1
     collapsed_ranks = [np.zeros(len(r)) for r in ranks[0]]
     for rank in ranks:
