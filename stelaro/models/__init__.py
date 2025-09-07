@@ -8,9 +8,10 @@
 """
 
 from random import randint, shuffle
+from typing import Callable
 import numpy as np
 from sklearn.metrics import f1_score, precision_score
-from torch import tensor, no_grad, float32, Tensor, zeros, from_numpy
+from torch import argmax, tensor, no_grad, float32, Tensor, zeros, from_numpy
 from torch.nn import functional
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
@@ -502,3 +503,120 @@ def get_f1_by_category(confusion) -> np.ndarray:
         if d:
             f1[i] = 2 * TP / d
     return f1
+
+
+class Classifier(BaseClassifier):
+    """A DNA read classification dataset."""
+    def __init__(
+            self,
+            length: int,
+            mapping: dict,
+            device: str,
+            model: any,
+            formatter: Callable
+            ):
+        self.length = length
+        self.model = model(length, len(mapping)).to(device)
+        self.device = device
+        self.mapping = mapping
+        self.formatter = formatter
+
+    def get_parameters(self):
+        return self.model.parameters()
+
+    def predict(self, x_batch):
+        self.model.eval()
+        x_batch = self.formatter(x_batch)
+        output = self.model(x_batch)
+        if type(output) is tuple:
+            output = output[0]
+        predictions = argmax(output, dim=1).to("cpu")
+        return predictions
+
+    def _compute_loss(
+            self,
+            x_batch,
+            y_batch,
+            loss_function_type,
+            loss_function
+            ) -> float:
+        x_batch = x_batch.long().to(self.device)
+        x_batch = self.formatter(x_batch)
+        y_batch = y_batch.long().to(self.device)
+        output = self.model(x_batch)
+        if loss_function_type == "supervised":
+            loss = loss_function(output, y_batch)
+        elif loss_function_type =="unsupervised":
+            loss = loss_function(output, x_batch)
+        elif loss_function_type =="semi-supervised":
+            loss = loss_function(output, x_batch, y_batch)
+        return loss
+
+    def train(
+            self,
+            train_loader: DataLoader,
+            validate_loader: DataLoader,
+            optimizer,
+            max_n_epochs: int,
+            patience: int,
+            loss_function: Callable,
+            loss_function_type: str,
+            ):
+        TRAINING_TYPES = ("supervised", "unsupervised", "semi-supervised")
+        assert loss_function_type in TRAINING_TYPES, "Invalid training type."
+        losses = []
+        validation_losses = []
+        average_f_scores = []
+        best_f1 = 0.0
+        for epoch in range(max_n_epochs):
+            self.model.train()
+            losses.append(0)
+            progress = 0
+            for x_batch, y_batch in tqdm(train_loader):
+                loss = self._compute_loss(
+                    x_batch, y_batch, loss_function_type, loss_function
+                )
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                losses[-1] += loss.item()
+                if progress and progress % 200 == 0:
+                    ps = evaluate_precision(self, validate_loader, self.device, self.mapping)
+                    ps = [float(p) for p in ps]
+                    p_msg = [float(f"{p:.5}") for p in ps]
+                    print(f"P: {p_msg}")
+                progress += 1
+            losses[-1] /= len(train_loader.dataset)
+            losses[-1] *= self.length
+            validation_losses.append(0)
+            for x_batch, y_batch in validate_loader:
+                loss = self._compute_loss(
+                    x_batch, y_batch, loss_function_type, loss_function
+                )
+                validation_losses[-1] += loss.item()
+            validation_losses[-1] /= len(validate_loader.dataset)
+            validation_losses[-1] *= self.length
+            f1 = evaluate(self, validate_loader, self.device, self.mapping)
+            f1 = [float(f) for f in f1]
+            f1_msg = [float(f"{f:.5}") for f in f1]
+            average_f_scores.append(f1)
+            if f1[-1] > best_f1:
+                best_f1 = f1[-1]
+            if f1[-1] < best_f1:
+                patience -= 1
+            ps = evaluate_precision(self, validate_loader, self.device, self.mapping)
+            ps = [float(p) for p in ps]
+            p_msg = [float(f"{p:.5}") for p in ps]
+            print(
+                f"{epoch+1}/{max_n_epochs}",
+                f"T loss: {losses[-1]:.5f}.",
+                f"V loss: {validation_losses[-1]:.5f}.",
+                f"F1: {f1_msg}.",
+                f"P: {p_msg}",
+                f"Patience: {patience}"
+            )
+            if patience <= 0:
+                print("The model is overfitting; stopping early.")
+                break
+        average_f_scores = list(np.array(average_f_scores).T)
+        return losses, average_f_scores, validation_losses
