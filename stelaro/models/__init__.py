@@ -580,7 +580,7 @@ class Classifier(BaseClassifier):
                 loss.backward()
                 optimizer.step()
                 losses[-1] += loss.item()
-                if progress and progress % 200 == 0:
+                if progress and progress % 500 == 0:
                     ps = evaluate_precision(self, validate_loader, self.device, self.mapping)
                     ps = [float(p) for p in ps]
                     p_msg = [float(f"{p:.5}") for p in ps]
