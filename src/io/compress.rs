@@ -1,9 +1,8 @@
-/// Compress reference genome files into tensor files.
-
-use std::collections::HashMap;
-use std::path::Path;
 use ndarray::{Array1, Array2};
+/// Compress reference genome files into tensor files.
+use std::collections::HashMap;
 use std::error::Error;
+use std::path::Path;
 
 /// Compress sequence files into vector files.
 ///
@@ -19,7 +18,7 @@ pub fn database(
     sequence_file_directory: &Path,
     output_directory: &Path,
     max_file_size: usize,
-    index: &Vec<(String, u64)>
+    index: &Vec<(String, u64)>,
 ) -> Result<u32, Box<dyn Error>> {
     Ok(0)
 }

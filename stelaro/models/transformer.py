@@ -23,19 +23,18 @@ from . import evaluate, get_f1_by_category, confusion_matrix, BaseClassifier
 
 class Classifier(BaseClassifier):
     """A DNA read classification dataset."""
-    def __init__(self, length, mapping, device, model, use_tokens=False):
+    def __init__(self, length, mapping, device, model, formatter):
         self.model = model(length, len(mapping)).to(device)
         self.device = device
         self.mapping = mapping
-        self.use_tokens = use_tokens
+        self.formatter = formatter
 
     def get_parameters(self):
         return self.model.parameters()
 
     def predict(self, x_batch):
         self.model.eval()
-        if self.use_tokens:
-            x_batch = x_batch.long()
+        x_batch = self.formatter(x_batch).long()
         predictions = argmax(self.model(x_batch), dim=1).to("cpu")
         return predictions
 
@@ -51,16 +50,18 @@ class Classifier(BaseClassifier):
         criterion = CrossEntropyLoss()
         # penalty_matrix = create_penalty_matrix(mapping).to(device)
         losses = []
+        validation_losses = []
         average_f_scores = []
         best_f1 = 0.0
         for epoch in range(max_n_epochs):
             self.model.train()
             losses.append(0)
-            n_processed = 0
+
+            n = 0
+
             for x_batch, y_batch in tqdm(train_loader):
                 x_batch = x_batch.long().to(self.device)
-                if permute:
-                    x_batch = x_batch.permute(0, 2, 1)  # Swap channels and sequence.
+                x_batch = self.formatter(x_batch)
                 y_batch = y_batch.long().to(self.device)
                 output = self.model(x_batch)
                 loss = criterion(output, y_batch)
@@ -69,10 +70,30 @@ class Classifier(BaseClassifier):
                 loss.backward()
                 optimizer.step()
                 losses[-1] += loss.item()
-                #n_processed += len(y_batch)
-                #if n_processed > 50_000:
-                #    break
-            f1 = evaluate(self, validate_loader, self.device, self.mapping, permute=permute)
+
+                n += 1
+                if n > 10:
+                    break
+
+            losses[-1] /= len(train_loader.dataset)
+            validation_losses.append(0)
+
+            n = 0
+
+            for x_batch, y_batch in validate_loader:
+                x_batch = x_batch.long().to(self.device)
+                x_batch = self.formatter(x_batch)
+                y_batch = y_batch.long().to(self.device)
+                output = self.model(x_batch)
+                loss = criterion(output, y_batch)
+                validation_losses[-1] += loss.item()
+
+                n += 1
+                if n > 10:
+                    break
+
+            validation_losses[-1] /= len(validate_loader.dataset)
+            f1 = evaluate(self, validate_loader, self.device, self.mapping)
             f1 = [float(f) for f in f1]
             average_f_scores.append(f1)
             if f1[-1] > best_f1:
@@ -90,7 +111,7 @@ class Classifier(BaseClassifier):
                 print("The model is overfitting; stopping early.")
                 break
         average_f_scores = list(np.array(average_f_scores).T)
-        return losses, average_f_scores
+        return losses, average_f_scores, validation_losses
 
     def train_large_dataset(
             self,
