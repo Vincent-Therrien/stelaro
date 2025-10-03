@@ -11,10 +11,11 @@ from random import randint, shuffle
 from typing import Callable
 import numpy as np
 from sklearn.metrics import f1_score, precision_score
-from torch import argmax, tensor, no_grad, float32, Tensor, zeros, from_numpy
+from torch import argmax, tensor, no_grad, float32, Tensor, zeros, cat
 from torch.nn import functional
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
+from time import time
 
 
 class SyntheticReadDataset(Dataset):
@@ -430,50 +431,73 @@ def rank_based_precision(
     return p
 
 
-def evaluate(classifier, loader, device, mapping):
+def evaluate(classifier, loader, device, mapping, time_limit: float = None):
     """Evaluate the F1 score at different taxonomic levels."""
     mappings = obtain_rank_based_mappings(mapping)
-    ranks = []
-    n_batches = 0
+    predicted_y = []
+    real_y = []
+    from torch import no_grad
     with no_grad():
         for x_batch, y_batch in loader:
             x_batch = x_batch.long().to(device)
             y_batch = y_batch.to("cpu")
             predictions = classifier.predict(x_batch)
-            ranks.append(rank_based_f1_score(mappings, y_batch, predictions))
-            n_batches += 1
-    collapsed_ranks = [np.zeros(len(r)) for r in ranks[0]]
-    for rank in ranks:
-        for i, result in enumerate(rank):
-            collapsed_ranks[i] += result
-    for i in range(len(collapsed_ranks)):
-        collapsed_ranks[i] = np.mean(collapsed_ranks[i])
-        collapsed_ranks[i] /= n_batches
-    collapsed_ranks = [r for r in reversed(collapsed_ranks)]
-    for i in range(len(collapsed_ranks) - 1):
-        assert collapsed_ranks[i] > collapsed_ranks[i + 1]
-    return collapsed_ranks
+            predicted_y += predictions
+            real_y += y_batch
+    ranks =  rank_based_f1_score(mappings, real_y, predicted_y)
+    collapsed = []
+    for rank in ranks[::-1]:
+        collapsed.append(np.mean(rank))
+    return collapsed
 
 
 def evaluate_precision(classifier, loader, device, mapping):
     """Evaluate the precision score at different taxonomic levels."""
     mappings = obtain_rank_based_mappings(mapping)
-    ranks = []
-    n_batches = 0
+    predicted_y = []
+    real_y = []
+    from torch import no_grad
     with no_grad():
         for x_batch, y_batch in loader:
             x_batch = x_batch.long().to(device)
             y_batch = y_batch.to("cpu")
             predictions = classifier.predict(x_batch)
-            ranks.append(rank_based_precision(mappings, y_batch, predictions))
-            n_batches += 1
+            predicted_y += predictions
+            real_y += y_batch
+    ranks =  rank_based_precision(mappings, real_y, predicted_y)
+    collapsed = []
+    for rank in ranks[::-1]:
+        collapsed.append(np.mean(rank))
+    return collapsed
+
+
+def estimate_precision(classifier, loader, device, mapping, time_limit = 30):
+    """Evaluate the precision score at different taxonomic levels."""
+    mappings = obtain_rank_based_mappings(mapping)
+    ranks = []
+    all_pred = []
+    all_y = []
+    a = time()
+    n = 0
+    with no_grad():
+        for x_batch, y_batch in loader:
+            x_batch = x_batch.long().to(device)
+            predictions = classifier.predict(x_batch)
+            all_pred.append(predictions)
+            all_y.append(y_batch)
+            n += len(y_batch)
+            if time() - a > time_limit:
+                print(f"Halting evaluation after {n} data points.")
+                break
+    all_y_cpu = cat(all_y, dim=0).to("cpu")
+    all_pred_cpu = cat(all_pred, dim=0).to("cpu")
+    ranks.append(rank_based_precision(mappings, all_y_cpu, all_pred_cpu))
     collapsed_ranks = [np.zeros(len(r)) for r in ranks[0]]
     for rank in ranks:
         for i, result in enumerate(rank):
             collapsed_ranks[i] += result
     for i in range(len(collapsed_ranks)):
         collapsed_ranks[i] = np.mean(collapsed_ranks[i])
-        collapsed_ranks[i] /= n_batches
     collapsed_ranks = [r for r in reversed(collapsed_ranks)]
     for i in range(len(collapsed_ranks) - 1):
         assert collapsed_ranks[i] > collapsed_ranks[i + 1]
@@ -515,6 +539,15 @@ class Classifier(BaseClassifier):
             model: any,
             formatter: Callable
             ):
+        """
+        Args:
+            length: Length of the sequences processed by the model.
+            mapping: Dictionary mapping a taxon to an index.
+            device: Device onto which run computations.
+            model: Neural network (e.g. PyTorch Module).
+            formatter: Function that converts the default input (tetramers)
+                into another format. If `None`, tetramers are used as input.
+        """
         self.length = length
         self.model = model(length, len(mapping)).to(device)
         self.device = device
@@ -526,11 +559,12 @@ class Classifier(BaseClassifier):
 
     def predict(self, x_batch):
         self.model.eval()
-        x_batch = self.formatter(x_batch)
+        if self.formatter:
+            x_batch = self.formatter(x_batch)
         output = self.model(x_batch)
         if type(output) is tuple:
             output = output[0]
-        predictions = argmax(output, dim=1).to("cpu")
+        predictions = argmax(output, dim=1)
         return predictions
 
     def _compute_loss(
@@ -541,7 +575,8 @@ class Classifier(BaseClassifier):
             loss_function
             ) -> float:
         x_batch = x_batch.long().to(self.device)
-        x_batch = self.formatter(x_batch)
+        if self.formatter:
+            x_batch = self.formatter(x_batch)
         y_batch = y_batch.long().to(self.device)
         output = self.model(x_batch)
         if loss_function_type == "supervised":
@@ -561,6 +596,7 @@ class Classifier(BaseClassifier):
             patience: int,
             loss_function: Callable,
             loss_function_type: str,
+            evaluation_interval: int = 2000
             ):
         TRAINING_TYPES = ("supervised", "unsupervised", "semi-supervised")
         assert loss_function_type in TRAINING_TYPES, "Invalid training type."
@@ -580,8 +616,8 @@ class Classifier(BaseClassifier):
                 loss.backward()
                 optimizer.step()
                 losses[-1] += loss.item()
-                if progress and progress % 500 == 0:
-                    ps = evaluate_precision(self, validate_loader, self.device, self.mapping)
+                if progress and progress % evaluation_interval == 0:
+                    ps = estimate_precision(self, validate_loader, self.device, self.mapping)
                     ps = [float(p) for p in ps]
                     p_msg = [float(f"{p:.5}") for p in ps]
                     print(f"P: {p_msg}")
@@ -596,7 +632,7 @@ class Classifier(BaseClassifier):
                 validation_losses[-1] += loss.item()
             validation_losses[-1] /= len(validate_loader.dataset)
             validation_losses[-1] *= self.length
-            f1 = evaluate(self, validate_loader, self.device, self.mapping)
+            f1 = evaluate(self, validate_loader, self.device, self.mapping, 60)
             f1 = [float(f) for f in f1]
             f1_msg = [float(f"{f:.5}") for f in f1]
             average_f_scores.append(f1)
@@ -604,7 +640,7 @@ class Classifier(BaseClassifier):
                 best_f1 = f1[-1]
             if f1[-1] < best_f1:
                 patience -= 1
-            ps = evaluate_precision(self, validate_loader, self.device, self.mapping)
+            ps = estimate_precision(self, validate_loader, self.device, self.mapping)
             ps = [float(p) for p in ps]
             p_msg = [float(f"{p:.5}") for p in ps]
             print(
@@ -618,5 +654,44 @@ class Classifier(BaseClassifier):
             if patience <= 0:
                 print("The model is overfitting; stopping early.")
                 break
+        average_f_scores = list(np.array(average_f_scores).T)
+        return losses, average_f_scores, validation_losses
+
+    def train_fast(
+            self,
+            train_loader: DataLoader,
+            validate_loader: DataLoader,
+            optimizer,
+            max_n_epochs: int,
+            patience: int,
+            loss_function: Callable,
+            loss_function_type: str,
+            ):
+        TRAINING_TYPES = ("supervised", "unsupervised", "semi-supervised")
+        assert loss_function_type in TRAINING_TYPES, "Invalid training type."
+        losses = []
+        validation_losses = []
+        average_f_scores = []
+        for epoch in range(max_n_epochs):
+            self.model.train()
+            losses.append(0)
+            progress = 0
+            for x_batch, y_batch in tqdm(train_loader):
+                loss = self._compute_loss(
+                    x_batch, y_batch, loss_function_type, loss_function
+                )
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                losses[-1] += loss.item()
+                if progress and progress % 1000 == 0:
+                    ps = estimate_precision(self, validate_loader, self.device, self.mapping)
+                    ps = [float(p) for p in ps]
+                    p_msg = [float(f"{p:.5}") for p in ps]
+                    print(f"P: {p_msg}")
+                progress += 1
+            losses[-1] /= len(train_loader.dataset)
+            losses[-1] *= self.length
+            validation_losses.append(0)
         average_f_scores = list(np.array(average_f_scores).T)
         return losses, average_f_scores, validation_losses
