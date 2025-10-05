@@ -11,9 +11,11 @@ from random import randint, shuffle
 from typing import Callable
 import numpy as np
 from sklearn.metrics import f1_score, precision_score
+import torch
 from torch import argmax, tensor, no_grad, float32, Tensor, zeros, cat
 from torch.nn import functional
 from torch.utils.data import Dataset, DataLoader
+from torch.nn.utils import clip_grad_norm_
 from tqdm import tqdm
 from time import time
 
@@ -378,15 +380,16 @@ def create_penalty_matrix(mapping) -> Tensor:
     return t
 
 
-def penalized_cross_entropy(logits, targets, penalty_matrix):
-    """Penalize some class predictions more than others.
-
-    June 2025: This does not improve performance with the `version_1` dataset.
+def penalized_cross_entropy(y_pred, y_true, penalty):
     """
-    log_probs = functional.log_softmax(logits, dim=1)
-    penalties = penalty_matrix[targets]
-    weighted_loss = (log_probs.exp() * penalties).sum(dim=1)
-    return weighted_loss.mean()
+    y_pred: [B, M] (raw logits)
+    y_true: [B] (class indices)
+    penalty: [M, M] (penalty matrix, 0 = good, 1 = bad)
+    """
+    probs = functional.softmax(y_pred, dim=-1)  # [B, M]
+    penalty_rows = penalty[y_true]  # [B, M]
+    loss = -torch.sum((1 - penalty_rows) * torch.log(probs + 1e-12), dim=-1)
+    return loss.sum()
 
 
 def rank_based_f1_score(
@@ -537,7 +540,8 @@ class Classifier(BaseClassifier):
             mapping: dict,
             device: str,
             model: any,
-            formatter: Callable
+            formatter: Callable,
+            clip: bool
             ):
         """
         Args:
@@ -547,12 +551,14 @@ class Classifier(BaseClassifier):
             model: Neural network (e.g. PyTorch Module).
             formatter: Function that converts the default input (tetramers)
                 into another format. If `None`, tetramers are used as input.
+            clip: If `True`, clip gradients to 1.0.
         """
         self.length = length
         self.model = model(length, len(mapping)).to(device)
         self.device = device
         self.mapping = mapping
         self.formatter = formatter
+        self.clip = clip
 
     def get_parameters(self):
         return self.model.parameters()
@@ -614,6 +620,8 @@ class Classifier(BaseClassifier):
                 )
                 optimizer.zero_grad()
                 loss.backward()
+                if self.clip:
+                    clip_grad_norm_(self.model.parameters(), 1.0)
                 optimizer.step()
                 losses[-1] += loss.item()
                 if progress and progress % evaluation_interval == 0:

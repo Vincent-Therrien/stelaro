@@ -239,14 +239,13 @@ def resolve_taxonomy(
         ranks: dict,
         tax_ids: set[str],
         names: dict,
-        ) -> list:
+        ) -> dict:
     """Convert a list of taxIDs into a taxonomic tree.
 
     Args:
         taxonomy_nodes: Dict returned by `get_all_taxonomy_parents`.
 
-    Returns: A network representing the taxonomy and a dictionary that maps
-        taxonomic IDs to node indices.
+    Returns: A dictionary that maps taxonomic IDs to node indices.
     """
     lineages = {}
     for taxon in tax_ids:
