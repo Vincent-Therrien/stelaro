@@ -532,6 +532,40 @@ def get_f1_by_category(confusion) -> np.ndarray:
     return f1
 
 
+def mask_tokens(x, mask_id, vocab_size, mlm_probability=0.15):
+    """Prepare masked input and MLM labels for MLM pretraining.
+
+    Args:
+        x: [B, L] input tensor.
+        mask_id: Token used for masking.
+        vocab_size: Vocabulary size excluding the masking token.
+
+    Returns:
+      masked_x: [B, L] (masked input)
+      mlm_labels: [B, L] (original ids, or -1 for unmasked positions)
+    """
+    MASK_FRACTION = 0.8
+    RANDOM_FRACTION = 0.5  # i.e. 10 % of all token; (1 - 0.8) * 0.5
+    labels = x.clone()
+    probability_matrix = torch.full(labels.shape, mlm_probability, device=x.device)
+    mask = torch.bernoulli(probability_matrix).bool()
+    mlm_labels = labels.clone()
+    mlm_labels[~mask] = -1  # only compute loss on masked tokens
+    indices_replaced = torch.bernoulli(
+        torch.full(labels.shape, MASK_FRACTION, device=x.device)
+    ).bool() & mask
+    modified_x = x.clone()
+    modified_x[indices_replaced] = mask_id
+    indices_random = torch.bernoulli(
+        torch.full(labels.shape, RANDOM_FRACTION, device=x.device)
+    ).bool() & mask & ~indices_replaced
+    random_tokens = torch.randint(
+        0, vocab_size, labels.shape, dtype=torch.long, device=x.device
+    )
+    modified_x[indices_random] = random_tokens[indices_random]
+    return modified_x, mlm_labels
+
+
 class Classifier(BaseClassifier):
     """A DNA read classification dataset."""
     def __init__(
@@ -583,15 +617,79 @@ class Classifier(BaseClassifier):
         x_batch = x_batch.long().to(self.device)
         if self.formatter:
             x_batch = self.formatter(x_batch)
-        y_batch = y_batch.long().to(self.device)
-        output = self.model(x_batch)
         if loss_function_type == "supervised":
+            output = self.model(x_batch)
+            y_batch = y_batch.long().to(self.device)
             loss = loss_function(output, y_batch)
         elif loss_function_type =="unsupervised":
+            output = self.model(x_batch)
             loss = loss_function(output, x_batch)
         elif loss_function_type =="semi-supervised":
+            output = self.model(x_batch)
+            y_batch = y_batch.long().to(self.device)
             loss = loss_function(output, x_batch, y_batch)
         return loss
+
+    def pretrain(
+            self,
+            train_loader: DataLoader,
+            optimizer,
+            max_batches: int,
+            vocab_size: int,
+            evaluation_interval: int = 500,
+            patience: int = 2,
+            mlm_probability: float = 0.15
+            ) -> None:
+        """Pretrain a neural network with masked language modelling (MLM).
+
+        Args:
+            train_loader: Training data.
+            optimizer: Model optimizer.
+            max_n_batches: Maximum number of optimizing steps.
+            vocab_size: Vocabulary size EXCLUDING the masking token.
+            evaluation interval: Number of steps between evaluations.
+            patience: Maximum increasing loss number before early stop.
+            mlm_probability: Fraction of masked tokens.
+        """
+        num_batches = 0
+        last_loss = float("inf")
+        total_loss = 0.0
+        for epoch in range(1000):
+            self.model.train()
+            for x_batch, _ in tqdm(train_loader):
+                x_batch = x_batch.long().to(self.device)
+                x_batch = self.formatter(x_batch)
+                masked_x, mlm_labels = mask_tokens(
+                    x_batch.clone(),
+                    vocab_size,
+                    vocab_size=256,
+                    mlm_probability=mlm_probability
+                )
+                logits_mlm = self.model(masked_x, mlm_labels)
+                loss = torch.nn.functional.cross_entropy(
+                    logits_mlm.view(-1, vocab_size + 1),
+                    mlm_labels.view(-1),
+                    ignore_index=-1,
+                )
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                total_loss += loss.item()
+                num_batches += 1
+                if num_batches % evaluation_interval == 0:
+                    avg_loss = total_loss / num_batches
+                    print(f"Step: {num_batches}. Epoch {epoch+1}: MLM loss = {avg_loss:.4f}. Patience: {patience}")
+                    if avg_loss > last_loss:
+                        patience -= 1
+                        if patience < 0:
+                            print("Overfitting; stopping early.")
+                            return
+                    else:
+                        last_loss = avg_loss
+                    total_loss = 0.0
+                if num_batches > max_batches:
+                    print("Performed enough steps.")
+                    return
 
     def train(
             self,
@@ -603,7 +701,20 @@ class Classifier(BaseClassifier):
             loss_function: Callable,
             loss_function_type: str,
             evaluation_interval: int = 2000
-            ):
+            ) -> None:
+        """Train a model.
+
+        Args:
+            train_loader: Training data.
+            validate_loader: Validation data.
+            optimizer: Model optimizer.
+            max_n_epochs: Maximum number of epochs.
+            patience: Maximum increasing loss number before early stop.
+            loss_function: Loss function.
+            loss_function_type: Type of training (supervised, unsupervised,
+                semi-supervised).
+            evaluation_interval: Number of steps between evaluations.
+        """
         TRAINING_TYPES = ("supervised", "unsupervised", "semi-supervised")
         assert loss_function_type in TRAINING_TYPES, "Invalid training type."
         losses = []
@@ -629,6 +740,7 @@ class Classifier(BaseClassifier):
                     ps = [float(p) for p in ps]
                     p_msg = [float(f"{p:.5}") for p in ps]
                     print(f"P: {p_msg}")
+                    self.model.train()
                 progress += 1
             losses[-1] /= len(train_loader.dataset)
             losses[-1] *= self.length
