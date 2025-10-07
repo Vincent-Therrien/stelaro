@@ -56,6 +56,8 @@ def decode_tetramer(sequence: list[int]) -> str:
     }
 
     def decode_integer(integer):
+        if sequence > 255:
+            raise RuntimeError(f"Invalid tetramer: {integer}")
         tetramer = ''
         for shift in (6, 4, 2, 0):
             two_bits = (integer >> shift) & 0b11

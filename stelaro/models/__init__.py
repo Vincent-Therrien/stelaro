@@ -43,12 +43,22 @@ class SyntheticReadDataset(Dataset):
 
 class SyntheticTetramerDataset(Dataset):
     """Dataset containing one-hot encoded synthetic reads."""
-    def __init__(self, directory: str, mapping: str = None, balance=False):
+    def __init__(
+            self,
+            directory: str,
+            mapping: str = None,
+            balance: bool = False,
+            labels: bool = True):
         """Args:
             directory: Path of the directory that contains the x and y files.
             mapping: Either `None` (all in main memory) or `"r"`
                 (memory-mapped, useful for very large datasets).
+            balance: If `True`, balance the dataset by eliminating frequent
+                taxa.
+            labels: If `True`, use classification labels. Incompatible with
+                `balance` argument.
         """
+        self.use_labels = labels
         if balance:
             x = np.load(directory + "x.npy", mmap_mode=mapping)
             y = np.load(directory + "y.npy", mmap_mode=mapping)
@@ -56,7 +66,8 @@ class SyntheticTetramerDataset(Dataset):
             n = min(counts)
             N = n * len(unique_values)
             self.x = np.zeros((N, 375), dtype=np.uint8)
-            self.y = np.zeros(N, dtype=np.uint16)
+            if labels:
+                self.y = np.zeros(N, dtype=np.uint16)
             indices = list(range(len(y)))
             shuffle(indices)
             amounts = {}
@@ -67,22 +78,27 @@ class SyntheticTetramerDataset(Dataset):
                 label = y[index]
                 if amounts[label] < n:
                     self.x[i] = x[index]
-                    self.y[i] = label
+                    if labels:
+                        self.y[i] = label
                     i += 1
                     amounts[label] += 1
                     if i >= N:
                         break
         else:
             self.x = np.load(directory + "x.npy", mmap_mode=mapping)
-            self.y = np.load(directory + "y.npy", mmap_mode=mapping)
+            if labels:
+                self.y = np.load(directory + "y.npy", mmap_mode=mapping)
 
     def __len__(self):
-        return len(self.y)
+        return len(self.x)
 
     def __getitem__(self, idx):
         x = self.x[idx]
-        y = self.y[idx]
-        return tensor(x), tensor(y)
+        if self.use_labels:
+            y = self.y[idx]
+            return tensor(x), tensor(y)
+        else:
+            return tensor(x)
 
 
 class SyntheticMultiLevelTetramerDataset(Dataset):
@@ -532,6 +548,17 @@ def get_f1_by_category(confusion) -> np.ndarray:
     return f1
 
 
+def span_mask(x, mask_prob=0.15, span_len=5):
+    B, L = x.shape
+    mask = torch.zeros_like(x, dtype=torch.bool)
+    for b in range(B):
+        num_spans = int(L * mask_prob / span_len)
+        for _ in range(num_spans):
+            start = torch.randint(0, L - span_len + 1, (1,)).item()
+            mask[b, start:start + span_len] = True
+    return mask
+
+
 def mask_tokens(x, mask_id, vocab_size, mlm_probability=0.15):
     """Prepare masked input and MLM labels for MLM pretraining.
 
@@ -547,8 +574,18 @@ def mask_tokens(x, mask_id, vocab_size, mlm_probability=0.15):
     MASK_FRACTION = 0.8
     RANDOM_FRACTION = 0.5  # i.e. 10 % of all token; (1 - 0.8) * 0.5
     labels = x.clone()
-    probability_matrix = torch.full(labels.shape, mlm_probability, device=x.device)
-    mask = torch.bernoulli(probability_matrix).bool()
+
+    # probability_matrix = torch.full(labels.shape, mlm_probability, device=x.device)
+    # mask = torch.bernoulli(probability_matrix).bool()
+    B, L = x.shape
+    span_len = 5
+    mask = torch.zeros_like(x, dtype=torch.bool)
+    for b in range(B):
+        num_spans = int(L * mlm_probability / span_len)
+        for _ in range(num_spans):
+            start = torch.randint(0, L - span_len + 1, (1,)).item()
+            mask[b, start:start + span_len] = True
+
     mlm_labels = labels.clone()
     mlm_labels[~mask] = -1  # only compute loss on masked tokens
     indices_replaced = torch.bernoulli(
@@ -656,7 +693,7 @@ class Classifier(BaseClassifier):
         total_loss = 0.0
         for epoch in range(1000):
             self.model.train()
-            for x_batch, _ in tqdm(train_loader):
+            for x_batch in tqdm(train_loader):
                 x_batch = x_batch.long().to(self.device)
                 x_batch = self.formatter(x_batch)
                 masked_x, mlm_labels = mask_tokens(
@@ -678,7 +715,11 @@ class Classifier(BaseClassifier):
                 num_batches += 1
                 if num_batches % evaluation_interval == 0:
                     avg_loss = total_loss / num_batches
-                    print(f"Step: {num_batches}. Epoch {epoch+1}: MLM loss = {avg_loss:.4f}. Patience: {patience}")
+                    print(f"Step: {num_batches}. Epoch: {epoch+1}. MLM loss: {avg_loss:.4f}. Patience: {patience}")
+                    with torch.no_grad():
+                        probs = torch.softmax(logits_mlm, dim=-1)
+                        entropies = -torch.sum(probs * probs.log(), dim=-1).mean()
+                        print("Mean entropy:", entropies.item())
                     if avg_loss > last_loss:
                         patience -= 1
                         if patience < 0:
