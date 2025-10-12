@@ -559,42 +559,41 @@ def span_mask(x, mask_prob=0.15, span_len=5):
     return mask
 
 
-def mask_tokens(x, mask_id, vocab_size, mlm_probability=0.15):
+def mask_tokens(
+        x,
+        mask_id,
+        vocab_size,
+        mlm_probability: float = 0.15,
+        mask_fraction: float = 1.0
+        ):
     """Prepare masked input and MLM labels for MLM pretraining.
 
     Args:
         x: [B, L] input tensor.
         mask_id: Token used for masking.
         vocab_size: Vocabulary size excluding the masking token.
+        mlm_probability: Fraction of input tokens to be manipulated for MLM.
+        mask_fraction: Fraction of tokens manipultated by the `mlm_prabability`
+            parameter that will be masked. Non-masked tokens will be randomly
+            modified (50 %) or left unchanged (50 %).
 
     Returns:
       masked_x: [B, L] (masked input)
       mlm_labels: [B, L] (original ids, or -1 for unmasked positions)
     """
-    MASK_FRACTION = 0.8
-    RANDOM_FRACTION = 0.5  # i.e. 10 % of all token; (1 - 0.8) * 0.5
     labels = x.clone()
-
-    # probability_matrix = torch.full(labels.shape, mlm_probability, device=x.device)
-    # mask = torch.bernoulli(probability_matrix).bool()
-    B, L = x.shape
-    span_len = 5
-    mask = torch.zeros_like(x, dtype=torch.bool)
-    for b in range(B):
-        num_spans = int(L * mlm_probability / span_len)
-        for _ in range(num_spans):
-            start = torch.randint(0, L - span_len + 1, (1,)).item()
-            mask[b, start:start + span_len] = True
-
+    probability_matrix = torch.full(labels.shape, mlm_probability, device=x.device)
+    mask = torch.bernoulli(probability_matrix).bool()
     mlm_labels = labels.clone()
-    mlm_labels[~mask] = -1  # only compute loss on masked tokens
+    MASKING_LABEL = -1
+    mlm_labels[~mask] = MASKING_LABEL
     indices_replaced = torch.bernoulli(
-        torch.full(labels.shape, MASK_FRACTION, device=x.device)
+        torch.full(labels.shape, mask_fraction, device=x.device)
     ).bool() & mask
     modified_x = x.clone()
     modified_x[indices_replaced] = mask_id
     indices_random = torch.bernoulli(
-        torch.full(labels.shape, RANDOM_FRACTION, device=x.device)
+        torch.full(labels.shape, 0.5, device=x.device)
     ).bool() & mask & ~indices_replaced
     random_tokens = torch.randint(
         0, vocab_size, labels.shape, dtype=torch.long, device=x.device
@@ -604,7 +603,7 @@ def mask_tokens(x, mask_id, vocab_size, mlm_probability=0.15):
 
 
 class Classifier(BaseClassifier):
-    """A DNA read classification dataset."""
+    """A neural network-based DNA read classification model."""
     def __init__(
             self,
             length: int,
@@ -632,9 +631,17 @@ class Classifier(BaseClassifier):
         self.clip = clip
 
     def get_parameters(self):
+        """Get the parameters of the neural network."""
         return self.model.parameters()
 
-    def predict(self, x_batch):
+    def predict(self, x_batch) -> list[int]:
+        """Predict classes based on reads.
+
+        Args:
+            x_batch: Sequence batch of dimension [B, L].
+
+        Returns: B predicted classes.
+        """
         self.model.eval()
         if self.formatter:
             x_batch = self.formatter(x_batch)
@@ -688,9 +695,11 @@ class Classifier(BaseClassifier):
             patience: Maximum increasing loss number before early stop.
             mlm_probability: Fraction of masked tokens.
         """
-        num_batches = 0
-        last_loss = float("inf")
+        num_batches, evaluation_n_batches = 0, 0
+        lowest_loss = float("inf")
         total_loss = 0.0
+        n_identicals, denominator = 0, 0
+        entropies = 0.0
         for epoch in range(1000):
             self.model.train()
             for x_batch in tqdm(train_loader):
@@ -713,21 +722,32 @@ class Classifier(BaseClassifier):
                 optimizer.step()
                 total_loss += loss.item()
                 num_batches += 1
+                evaluation_n_batches += 1
+                with torch.no_grad():
+                    probs = torch.softmax(logits_mlm, dim=-1)
+                    entropies += -torch.sum(probs * probs.log(), dim=-1).mean()
+                    predictions = argmax(logits_mlm, dim=-1)
+                    num_identical = (predictions == mlm_labels).sum().item()
+                    n_identicals += num_identical
+                    denominator += (mlm_labels != -1).sum().item()
                 if num_batches % evaluation_interval == 0:
-                    avg_loss = total_loss / num_batches
+                    avg_loss = total_loss / evaluation_n_batches
                     print(f"Step: {num_batches}. Epoch: {epoch+1}. MLM loss: {avg_loss:.4f}. Patience: {patience}")
-                    with torch.no_grad():
-                        probs = torch.softmax(logits_mlm, dim=-1)
-                        entropies = -torch.sum(probs * probs.log(), dim=-1).mean()
-                        print("Mean entropy:", entropies.item())
-                    if avg_loss > last_loss:
+                    entropy = entropies.item() / evaluation_n_batches
+                    print(f"Average entropy: {entropy:.5}. ", end="")
+                    n = n_identicals
+                    d = denominator
+                    print(f"Correct predictions: {n} / {d} ({100.0 * n / d:.5} %).")
+                    n_identicals, denominator, entropies = 0, 0, 0
+                    if lowest_loss < avg_loss:
                         patience -= 1
-                        if patience < 0:
+                        if patience <= 0:
                             print("Overfitting; stopping early.")
                             return
                     else:
-                        last_loss = avg_loss
+                        lowest_loss = avg_loss
                     total_loss = 0.0
+                    evaluation_n_batches = 0
                 if num_batches > max_batches:
                     print("Performed enough steps.")
                     return
@@ -741,7 +761,8 @@ class Classifier(BaseClassifier):
             patience: int,
             loss_function: Callable,
             loss_function_type: str,
-            evaluation_interval: int = 2000
+            evaluation_interval: int = 2000,
+            evaluation_maximum_duration: float = 30,
             ) -> None:
         """Train a model.
 
@@ -755,6 +776,8 @@ class Classifier(BaseClassifier):
             loss_function_type: Type of training (supervised, unsupervised,
                 semi-supervised).
             evaluation_interval: Number of steps between evaluations.
+            evaluation_maximum_duration: Maximum number of seconds to perform
+                an evaluation.
         """
         TRAINING_TYPES = ("supervised", "unsupervised", "semi-supervised")
         assert loss_function_type in TRAINING_TYPES, "Invalid training type."
@@ -777,7 +800,12 @@ class Classifier(BaseClassifier):
                 optimizer.step()
                 losses[-1] += loss.item()
                 if progress and progress % evaluation_interval == 0:
-                    ps = estimate_precision(self, validate_loader, self.device, self.mapping)
+                    ps = estimate_precision(
+                        self,
+                        validate_loader,
+                        self.device,
+                        self.mapping
+                    )
                     ps = [float(p) for p in ps]
                     p_msg = [float(f"{p:.5}") for p in ps]
                     print(f"P: {p_msg}")
@@ -793,7 +821,13 @@ class Classifier(BaseClassifier):
                 validation_losses[-1] += loss.item()
             validation_losses[-1] /= len(validate_loader.dataset)
             validation_losses[-1] *= self.length
-            f1 = evaluate(self, validate_loader, self.device, self.mapping, 60)
+            f1 = evaluate(
+                self,
+                validate_loader,
+                self.device,
+                self.mapping,
+                time_limit=evaluation_maximum_duration
+            )
             f1 = [float(f) for f in f1]
             f1_msg = [float(f"{f:.5}") for f in f1]
             average_f_scores.append(f1)
@@ -801,7 +835,13 @@ class Classifier(BaseClassifier):
                 best_f1 = f1[-1]
             if f1[-1] < best_f1:
                 patience -= 1
-            ps = estimate_precision(self, validate_loader, self.device, self.mapping)
+            ps = estimate_precision(
+                self,
+                validate_loader,
+                self.device,
+                self.mapping,
+                time_limit=evaluation_maximum_duration
+            )
             ps = [float(p) for p in ps]
             p_msg = [float(f"{p:.5}") for p in ps]
             print(
@@ -815,44 +855,5 @@ class Classifier(BaseClassifier):
             if patience <= 0:
                 print("The model is overfitting; stopping early.")
                 break
-        average_f_scores = list(np.array(average_f_scores).T)
-        return losses, average_f_scores, validation_losses
-
-    def train_fast(
-            self,
-            train_loader: DataLoader,
-            validate_loader: DataLoader,
-            optimizer,
-            max_n_epochs: int,
-            patience: int,
-            loss_function: Callable,
-            loss_function_type: str,
-            ):
-        TRAINING_TYPES = ("supervised", "unsupervised", "semi-supervised")
-        assert loss_function_type in TRAINING_TYPES, "Invalid training type."
-        losses = []
-        validation_losses = []
-        average_f_scores = []
-        for epoch in range(max_n_epochs):
-            self.model.train()
-            losses.append(0)
-            progress = 0
-            for x_batch, y_batch in tqdm(train_loader):
-                loss = self._compute_loss(
-                    x_batch, y_batch, loss_function_type, loss_function
-                )
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-                losses[-1] += loss.item()
-                if progress and progress % 1000 == 0:
-                    ps = estimate_precision(self, validate_loader, self.device, self.mapping)
-                    ps = [float(p) for p in ps]
-                    p_msg = [float(f"{p:.5}") for p in ps]
-                    print(f"P: {p_msg}")
-                progress += 1
-            losses[-1] /= len(train_loader.dataset)
-            losses[-1] *= self.length
-            validation_losses.append(0)
         average_f_scores = list(np.array(average_f_scores).T)
         return losses, average_f_scores, validation_losses
