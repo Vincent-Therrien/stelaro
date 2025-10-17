@@ -205,14 +205,17 @@ def _get_taxonomy_parents(
     return result
 
 
-def get_all_taxonomy_parents(nodes: str, merged: str) -> tuple:
+def get_all_taxonomy_parents(nodes: str, merged: str) -> tuple[dict]:
     """Recursively fetch all parents in the NCBI taxonomy.
 
     Args:
         nodes: File path to the `nodes.dmp` file of the NCBI taxonomy.
         merged: File path to the `merged.dmp` file of the NCBI taxonomy.
 
-    Return: A tuple of dict: (parent to children, tax_id to rank)
+    Return: Two dictionaries. In the first one, keys corresponds to parent
+        taxonomic identifiers and values, to children taxonomic identifiers.
+        In the second one, keys correspond to taxonomic identifiers and values,
+        to taxonomic ranks.
     """
     id_to_parent = {}
     id_to_rank = {}
