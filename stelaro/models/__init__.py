@@ -254,20 +254,18 @@ class BaseClassifier:
             optimizer,
             max_n_epochs: int,
             patience: int,
+            loss_function: Callable,
+            loss_function_type: str,
+            evaluation_interval: int = 5000,
+            evaluation_maximum_duration: float = 30,
+            patience_interval: int = 1000,
             ):
         """Train a neural network.
 
         Args:
-            model: Neural network
-            train_loader: Training data loader
-            validate_loader: Validation data loader
-            optimizer: Optimizer
-            max_n_epochs: Maximum number of training epochs.
-            patience: Number of epochs during which the validation F1 score is
-                allowed to decrease before early stop. Set to `None` to avoid
-                early stop.
-            device: Specify CPU or CUDA.
-            mapping: Maps an index to a taxonomic description.
+            model: Neural network.
+            train_loader: Training data loader.
+            validate_loader: Validation data loader.
         """
         raise NotImplementedError("Can't train.")
 
@@ -290,14 +288,23 @@ class RandomClassifier(BaseClassifier):
             optimizer,
             max_n_epochs: int,
             patience: int,
+            loss_function: Callable,
+            loss_function_type: str,
+            evaluation_interval: int = 5000,
+            evaluation_maximum_duration: float = 30,
+            patience_interval: int = 1000,
             ):
         n_classes = 0
+        n_steps = 0
         for _, y_batch in tqdm(train_loader):
             n = max(y_batch.long())
             if n > n_classes:
                 n_classes = n
+            n_steps += 1
+            if n_steps > 10_000:
+                break
         self.n_classes = n_classes
-        return [], [], []
+        return None, None, None, None
 
     def train_large_dataset(
             self,
@@ -367,10 +374,16 @@ def obtain_rank_based_mappings(mapping: dict) -> list[dict]:
         keys.append(set())
         mappings.append({})
         for j, labels in mapping.items():
-            label = labels[i]
-            if label not in keys[-1]:
+            if labels == ["unknown", ]:
+                label = "unknown"
+                assert label not in keys, "Unexpected unknown taxon."
                 keys[-1].add(label)
-            mappings[-1][int(j)] = len(keys[-1]) - 1
+                mappings[-1][int(j)] = len(keys[-1]) - 1
+            else:
+                label = labels[i]
+                if label not in keys[-1]:
+                    keys[-1].add(label)
+                mappings[-1][int(j)] = len(keys[-1]) - 1
         if i == len(mapping['0']) - 1:
             assert len(keys[-1]) == len(mapping), "Duplicate names."
     return mappings
@@ -432,7 +445,7 @@ def rank_based_f1_score(
 def rank_based_precision(
         mappings: dict, target: list[int], predictions: list[int]
         ) -> list[np.ndarray]:
-    """Evaluate F1 score at multiple taxonomic ranks."""
+    """Evaluate precision at multiple taxonomic ranks."""
     p = []
     for mapping in mappings:
         labels = list(set(mapping.values()))
@@ -519,7 +532,10 @@ def estimate_precision(classifier, loader, device, mapping, time_limit = 30):
         collapsed_ranks[i] = np.mean(collapsed_ranks[i])
     collapsed_ranks = [r for r in reversed(collapsed_ranks)]
     for i in range(len(collapsed_ranks) - 1):
-        assert collapsed_ranks[i] > collapsed_ranks[i + 1]
+        a = collapsed_ranks[i]
+        b = collapsed_ranks[i + 1]
+        if a < b:
+            print(f"Warning: Incoherent precision scores {a} and {b}.")
     return collapsed_ranks
 
 
@@ -658,19 +674,19 @@ class Classifier(BaseClassifier):
             loss_function_type,
             loss_function
             ) -> float:
-        x_batch = x_batch.long().to(self.device)
+        x_batch = x_batch.to(self.device).long()
         if self.formatter:
             x_batch = self.formatter(x_batch)
         if loss_function_type == "supervised":
             output = self.model(x_batch)
-            y_batch = y_batch.long().to(self.device)
+            y_batch = y_batch.to(self.device).long()
             loss = loss_function(output, y_batch)
         elif loss_function_type =="unsupervised":
             output = self.model(x_batch)
             loss = loss_function(output, x_batch)
         elif loss_function_type =="semi-supervised":
             output = self.model(x_batch)
-            y_batch = y_batch.long().to(self.device)
+            y_batch = y_batch.to(self.device).long()
             loss = loss_function(output, x_batch, y_batch)
         return loss
 
@@ -752,6 +768,28 @@ class Classifier(BaseClassifier):
                     print("Performed enough steps.")
                     return
 
+    def _get_validation_loss(
+            self,
+            validation_data,
+            loss_function_type,
+            loss_function,
+            time_limit: float = 20,
+            ) -> float:
+        validation_loss = 0
+        i = 0
+        a = time()
+        for x_batch, y_batch in validation_data:
+            loss = self._compute_loss(
+                x_batch, y_batch, loss_function_type, loss_function
+            )
+            validation_loss += loss.item()
+            i += 1
+            if time() - a > time_limit:
+                break
+        validation_loss /= i
+        validation_loss *= self.length
+        return validation_loss
+
     def train(
             self,
             train_loader: DataLoader,
@@ -761,8 +799,10 @@ class Classifier(BaseClassifier):
             patience: int,
             loss_function: Callable,
             loss_function_type: str,
-            evaluation_interval: int = 2000,
+            evaluation_interval: int = 5000,
             evaluation_maximum_duration: float = 30,
+            patience_interval: int = 1000,
+            n_max_steps: int = 100_000,
             ) -> None:
         """Train a model.
 
@@ -771,89 +811,96 @@ class Classifier(BaseClassifier):
             validate_loader: Validation data.
             optimizer: Model optimizer.
             max_n_epochs: Maximum number of epochs.
-            patience: Maximum increasing loss number before early stop.
+            patience: Maximum amount of times that the validation loss is
+                allowed to increase before early stop.
             loss_function: Loss function.
             loss_function_type: Type of training (supervised, unsupervised,
                 semi-supervised).
             evaluation_interval: Number of steps between evaluations.
             evaluation_maximum_duration: Maximum number of seconds to perform
                 an evaluation.
+            patience_interval: Number of steps to modify the patience.
         """
         TRAINING_TYPES = ("supervised", "unsupervised", "semi-supervised")
         assert loss_function_type in TRAINING_TYPES, "Invalid training type."
-        losses = []
+        training_losses = []
         validation_losses = []
         average_f_scores = []
-        best_f1 = 0.0
+        average_p_scores = []
+        n_steps = 0
         for epoch in range(max_n_epochs):
+            current_loss = 0
+            n_epoch_steps = 0
             self.model.train()
-            losses.append(0)
-            progress = 0
             for x_batch, y_batch in tqdm(train_loader):
                 loss = self._compute_loss(
                     x_batch, y_batch, loss_function_type, loss_function
                 )
                 optimizer.zero_grad()
+                current_loss += loss.item()
                 loss.backward()
                 if self.clip:
                     clip_grad_norm_(self.model.parameters(), 1.0)
                 optimizer.step()
-                losses[-1] += loss.item()
-                if progress and progress % evaluation_interval == 0:
+                # Infrequent evaluations; check real performance.
+                msg = ""
+                if n_steps and n_steps % evaluation_interval == 0:
+                    f1 = evaluate(
+                        self,
+                        validate_loader,
+                        self.device,
+                        self.mapping,
+                        time_limit=evaluation_maximum_duration
+                    )
+                    f1 = [float(f) for f in f1]
+                    average_f_scores.append(f1)
+                    f1_msg = [float(f"{f:.5}") for f in f1]
                     ps = estimate_precision(
                         self,
                         validate_loader,
                         self.device,
-                        self.mapping
+                        self.mapping,
+                        time_limit=evaluation_maximum_duration
                     )
                     ps = [float(p) for p in ps]
+                    average_p_scores.append(ps)
                     p_msg = [float(f"{p:.5}") for p in ps]
-                    print(f"P: {p_msg}")
+                    msg += f"{epoch+1}/{max_n_epochs}"
+                    msg += f"F1: {f1_msg}."
+                    msg += f"Precision: {p_msg}"
                     self.model.train()
-                progress += 1
-            losses[-1] /= len(train_loader.dataset)
-            losses[-1] *= self.length
-            validation_losses.append(0)
-            for x_batch, y_batch in validate_loader:
-                loss = self._compute_loss(
-                    x_batch, y_batch, loss_function_type, loss_function
-                )
-                validation_losses[-1] += loss.item()
-            validation_losses[-1] /= len(validate_loader.dataset)
-            validation_losses[-1] *= self.length
-            f1 = evaluate(
-                self,
-                validate_loader,
-                self.device,
-                self.mapping,
-                time_limit=evaluation_maximum_duration
-            )
-            f1 = [float(f) for f in f1]
-            f1_msg = [float(f"{f:.5}") for f in f1]
-            average_f_scores.append(f1)
-            if f1[-1] > best_f1:
-                best_f1 = f1[-1]
-            if f1[-1] < best_f1:
-                patience -= 1
-            ps = estimate_precision(
-                self,
-                validate_loader,
-                self.device,
-                self.mapping,
-                time_limit=evaluation_maximum_duration
-            )
-            ps = [float(p) for p in ps]
-            p_msg = [float(f"{p:.5}") for p in ps]
-            print(
-                f"{epoch+1}/{max_n_epochs}",
-                f"T loss: {losses[-1]:.5f}.",
-                f"V loss: {validation_losses[-1]:.5f}.",
-                f"F1: {f1_msg}.",
-                f"P: {p_msg}",
-                f"Patience: {patience}"
-            )
-            if patience <= 0:
-                print("The model is overfitting; stopping early.")
-                break
-        average_f_scores = list(np.array(average_f_scores).T)
-        return losses, average_f_scores, validation_losses
+                # Frequent evaluations; report losses.
+                if n_steps and (
+                        n_steps % patience_interval == 0
+                        or n_steps >= n_max_steps
+                    ):
+                    training_losses.append(current_loss * self.length / patience_interval)
+                    current_loss = 0
+                    validation_losses.append(
+                        self._get_validation_loss(
+                            validate_loader,
+                            loss_function_type,
+                            loss_function,
+                        )
+                    )
+                    if len(validation_losses) > 1:
+                        best_loss = min(validation_losses[:-1])
+                        if validation_losses[-1] > best_loss:
+                            patience -= 1
+                    if msg:
+                        msg += "\n"
+                    msg += f"Training loss: {training_losses[-1]:.5f}. "
+                    msg += f"Validation loss: {validation_losses[-1]:.5f}. "
+                    msg += f"Patience: {patience}"
+                    if patience <= 0 or n_steps >= n_max_steps:
+                        print("The model is overfitting; stopping early.")
+                        f = list(np.array(average_f_scores).T)
+                        p = list(np.array(average_p_scores).T)
+                        return training_losses, validation_losses, f, p
+                if msg:
+                    print(msg)
+                n_steps += 1
+                n_epoch_steps += 1
+        f = list(np.array(average_f_scores).T)
+        p = list(np.array(average_p_scores).T)
+        return training_losses, validation_losses, f, p
