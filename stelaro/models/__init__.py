@@ -434,33 +434,12 @@ def rank_based_f1_score(
             f1_score(
                 normalized_target,
                 normalized_pred,
-                average=None,
+                average="macro",
                 labels=labels,
                 zero_division=0.0
             )
         )
     return f
-
-
-def rank_based_precision(
-        mappings: dict, target: list[int], predictions: list[int]
-        ) -> list[np.ndarray]:
-    """Evaluate precision at multiple taxonomic ranks."""
-    p = []
-    for mapping in mappings:
-        labels = list(set(mapping.values()))
-        normalized_target = [mapping[int(v)] for v in list(target)]
-        normalized_pred = [mapping[int(v)] for v in list(predictions)]
-        p.append(
-            precision_score(
-                normalized_target,
-                normalized_pred,
-                average=None,
-                labels=labels,
-                zero_division=0.0
-            )
-        )
-    return p
 
 
 def evaluate(classifier, loader, device, mapping, time_limit: float = None):
@@ -483,7 +462,37 @@ def evaluate(classifier, loader, device, mapping, time_limit: float = None):
     return collapsed
 
 
-def evaluate_precision(classifier, loader, device, mapping):
+def rank_based_precision(
+        mappings: dict,
+        target: list[int],
+        predictions: list[int],
+        average: str="macro"
+        ) -> list[np.ndarray]:
+    """Evaluate precision at multiple taxonomic ranks."""
+    p = []
+    for mapping in mappings:
+        labels = list(set(mapping.values()))
+        normalized_target = [mapping[int(v)] for v in list(target)]
+        normalized_pred = [mapping[int(v)] for v in list(predictions)]
+        p.append(
+            precision_score(
+                normalized_target,
+                normalized_pred,
+                average=average,
+                labels=labels,
+                zero_division=0.0
+            )
+        )
+    return p
+
+
+def evaluate_precision(
+        classifier,
+        loader,
+        device,
+        mapping,
+        average: str="macro"
+        ) -> list[float]:
     """Evaluate the precision score at different taxonomic levels."""
     mappings = obtain_rank_based_mappings(mapping)
     predicted_y = []
@@ -496,7 +505,7 @@ def evaluate_precision(classifier, loader, device, mapping):
             predictions = classifier.predict(x_batch)
             predicted_y += predictions
             real_y += y_batch
-    ranks =  rank_based_precision(mappings, real_y, predicted_y)
+    ranks =  rank_based_precision(mappings, real_y, predicted_y, average)
     collapsed = []
     for rank in ranks[::-1]:
         collapsed.append(np.mean(rank))
@@ -505,38 +514,28 @@ def evaluate_precision(classifier, loader, device, mapping):
 
 def estimate_precision(classifier, loader, device, mapping, time_limit = 30):
     """Evaluate the precision score at different taxonomic levels."""
-    mappings = obtain_rank_based_mappings(mapping)
-    ranks = []
-    all_pred = []
-    all_y = []
     a = time()
     n = 0
+    mappings = obtain_rank_based_mappings(mapping)
+    predicted_y = []
+    real_y = []
+    from torch import no_grad
     with no_grad():
         for x_batch, y_batch in loader:
             x_batch = x_batch.long().to(device)
+            y_batch = y_batch.to("cpu")
             predictions = classifier.predict(x_batch)
-            all_pred.append(predictions)
-            all_y.append(y_batch)
+            predicted_y += predictions
+            real_y += y_batch
             n += len(y_batch)
             if time() - a > time_limit:
                 print(f"Halting evaluation after {n} data points.")
                 break
-    all_y_cpu = cat(all_y, dim=0).to("cpu")
-    all_pred_cpu = cat(all_pred, dim=0).to("cpu")
-    ranks.append(rank_based_precision(mappings, all_y_cpu, all_pred_cpu))
-    collapsed_ranks = [np.zeros(len(r)) for r in ranks[0]]
-    for rank in ranks:
-        for i, result in enumerate(rank):
-            collapsed_ranks[i] += result
-    for i in range(len(collapsed_ranks)):
-        collapsed_ranks[i] = np.mean(collapsed_ranks[i])
-    collapsed_ranks = [r for r in reversed(collapsed_ranks)]
-    for i in range(len(collapsed_ranks) - 1):
-        a = collapsed_ranks[i]
-        b = collapsed_ranks[i + 1]
-        if a < b:
-            print(f"Warning: Incoherent precision scores {a} and {b}.")
-    return collapsed_ranks
+    ranks =  rank_based_precision(mappings, real_y, predicted_y)
+    collapsed = []
+    for rank in ranks[::-1]:
+        collapsed.append(np.mean(rank))
+    return collapsed
 
 
 def confusion_matrix(classifier, loader, device, mapping) -> np.ndarray:
@@ -748,6 +747,10 @@ class Classifier(BaseClassifier):
                     denominator += (mlm_labels != -1).sum().item()
                 if num_batches % evaluation_interval == 0:
                     avg_loss = total_loss / evaluation_n_batches
+                    if lowest_loss < avg_loss:
+                        patience -= 1
+                    else:
+                        lowest_loss = avg_loss
                     print(f"Step: {num_batches}. Epoch: {epoch+1}. MLM loss: {avg_loss:.4f}. Patience: {patience}")
                     entropy = entropies.item() / evaluation_n_batches
                     print(f"Average entropy: {entropy:.5}. ", end="")
@@ -755,13 +758,9 @@ class Classifier(BaseClassifier):
                     d = denominator
                     print(f"Correct predictions: {n} / {d} ({100.0 * n / d:.5} %).")
                     n_identicals, denominator, entropies = 0, 0, 0
-                    if lowest_loss < avg_loss:
-                        patience -= 1
-                        if patience <= 0:
-                            print("Overfitting; stopping early.")
-                            return
-                    else:
-                        lowest_loss = avg_loss
+                    if patience <= 0:
+                        print("Overfitting; stopping early.")
+                        return
                     total_loss = 0.0
                     evaluation_n_batches = 0
                 if num_batches > max_batches:
@@ -828,9 +827,8 @@ class Classifier(BaseClassifier):
         average_f_scores = []
         average_p_scores = []
         n_steps = 0
+        current_loss = 0
         for epoch in range(max_n_epochs):
-            current_loss = 0
-            n_epoch_steps = 0
             self.model.train()
             for x_batch, y_batch in tqdm(train_loader):
                 loss = self._compute_loss(
@@ -893,14 +891,14 @@ class Classifier(BaseClassifier):
                     msg += f"Validation loss: {validation_losses[-1]:.5f}. "
                     msg += f"Patience: {patience}"
                     if patience <= 0 or n_steps >= n_max_steps:
-                        print("The model is overfitting; stopping early.")
+                        print("Stopping early.")
+                        print(msg)
                         f = list(np.array(average_f_scores).T)
                         p = list(np.array(average_p_scores).T)
                         return training_losses, validation_losses, f, p
                 if msg:
                     print(msg)
                 n_steps += 1
-                n_epoch_steps += 1
         f = list(np.array(average_f_scores).T)
         p = list(np.array(average_p_scores).T)
         return training_losses, validation_losses, f, p
