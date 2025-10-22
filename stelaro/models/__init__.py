@@ -863,9 +863,9 @@ class Classifier(BaseClassifier):
                     ps = [float(p) for p in ps]
                     average_p_scores.append(ps)
                     p_msg = [float(f"{p:.5}") for p in ps]
-                    msg += f"{epoch+1}/{max_n_epochs}"
-                    msg += f"F1: {f1_msg}."
-                    msg += f"Precision: {p_msg}"
+                    msg += f"{epoch+1}/{max_n_epochs} "
+                    msg += f"F1: {f1_msg}. "
+                    msg += f"Precision: {p_msg} "
                     self.model.train()
                 # Frequent evaluations; report losses.
                 if n_steps and (
