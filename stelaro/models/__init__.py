@@ -110,26 +110,26 @@ class SyntheticMultiLevelTetramerDataset(Dataset):
             selection: tuple[str],
             resolution: int,
             memory_mapping: str = None,
-            balance: bool = False,
-            other_factor: float = 2.0,
+            other_factor: float = None,
         ):
         """Args:
             directory: Path of the directory that contains the x and y files.
             mapping: Dictionary mapping indices to taxa.
-            selection: Taxonomic group to select within the mapping.
-            resolution: Number of ranks to discriminate.
+            selection: Taxonomic group to select within the mapping. For
+                example, `('Archaea', )` selects all taxa within the Archaea
+                domain.
+            resolution: Number of ranks to discriminate. For example, if the
+                `selection` specifies a phylum and `resolution` is set to `1`,
+                taxa will be grouped by phylum.
             memory_mapping: Either `None` (all in main memory) or `"r"`
                 (memory-mapped, useful for very large datasets).
-            balance: If True, randomly eliminate data from the majority class
-                until it comprises at most twice the number of data points from
-                the second biggest class.
-            other_factor: Adjusts balancing by determining the maximum number
-                of data points in the other class as a factor of the number
-                of data points in the second biggest class.
+            other_factor: If set, keep taxa that do not belong to the
+                selection at most `other_factor` times the number of
+                occurrences of the second most frequent class.
         """
         self.selection = selection
         self.conversion_table = tensor([i for i in range(len(mapping))])
-        n_levels = resolution if resolution else len(mapping[str(0)])
+        n_levels = resolution if resolution > 0 else len(mapping[str(0)])
         # Select a taxon.
         if selection:
             assert type(selection) is tuple, "Unexpected type."
@@ -164,7 +164,7 @@ class SyntheticMultiLevelTetramerDataset(Dataset):
         for i in range(len(mapping)):
             if self.conversion_table[i] == -1:
                 self.conversion_table[i] = n_taxa
-        if balance:
+        if other_factor:
             self.balance(directory, memory_mapping, other_factor)
         else:
             self.x = np.load(directory + "x.npy", mmap_mode=memory_mapping)
@@ -181,12 +181,9 @@ class SyntheticMultiLevelTetramerDataset(Dataset):
         y = np.load(directory + "y.npy", mmap_mode=memory_mapping)
         y = self.conversion_table[y]
         unique_values, counts = np.unique(y, return_counts = True)
-        if other_factor:
-            second_biggest = sorted(counts, reverse=True)[1]
-            N = int(second_biggest * other_factor)
-        else:
-            n = min(counts)
-            N = n * 4
+        non_other_counts = counts[:-1]
+        second_biggest = sorted(non_other_counts, reverse=True)[0]
+        N = int(second_biggest * other_factor)
         total_points = 0
         for count in counts:
             if count < N:
@@ -214,8 +211,6 @@ class SyntheticMultiLevelTetramerDataset(Dataset):
         return len(self.y)
 
     def __getitem__(self, idx):
-        # x = self.x[idx]
-        # y = self.y[idx]
         return self.x[idx], self.y[idx]
 
 
