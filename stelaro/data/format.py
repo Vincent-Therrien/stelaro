@@ -187,7 +187,9 @@ def to_codons(batch: Tensor) -> Tensor:
 
 
 def to_digits(batch: Tensor) -> Tensor:
-    """Transform a tetramer encoding into a digit encoding.
+    """Transform a tetramer encoding of dimension [batch_size, sequence_length]
+    with 256 possible values into a digit encoding of dimension
+    [batch_size, sequence_length * 4] with 4 possible values.
 
     Args:
         batch: A batch of tetramer-encoded sequences.
