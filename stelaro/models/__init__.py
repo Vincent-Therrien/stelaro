@@ -163,7 +163,7 @@ class SyntheticMultiLevelTetramerDataset(Dataset):
         # Replace wildcards.
         for i in range(len(mapping)):
             if self.conversion_table[i] == -1:
-                self.conversion_table[i] = n_taxa
+                self.conversion_table[i] = len(taxa) - 1
         if other_factor:
             self.balance(directory, memory_mapping, other_factor)
         else:
@@ -211,7 +211,7 @@ class SyntheticMultiLevelTetramerDataset(Dataset):
         return len(self.y)
 
     def __getitem__(self, idx):
-        return self.x[idx], self.y[idx]
+        return tensor(self.x[idx]), tensor(self.y[idx])
 
 
 class BasicReadDataset(Dataset):
@@ -634,7 +634,10 @@ class Classifier(BaseClassifier):
             clip: If `True`, clip gradients to 1.0.
         """
         self.length = length
-        self.model = model(length, len(mapping)).to(device)
+        if model:
+            self.model = model(length, len(mapping)).to(device)
+        else:
+            self.model = None
         self.device = device
         self.mapping = mapping
         self.formatter = formatter
@@ -644,13 +647,14 @@ class Classifier(BaseClassifier):
         """Get the parameters of the neural network."""
         return self.model.parameters()
 
-    def predict(self, x_batch) -> list[int]:
+    def predict(self, x_batch, probabilities: bool = False) -> list[int]:
         """Predict classes based on reads.
 
         Args:
             x_batch: Sequence batch of dimension [B, L].
+            probabilities: If False, return the most likely class.
 
-        Returns: B predicted classes.
+        Returns: B predicted classes or a vector of [B, C] probabilities.
         """
         self.model.eval()
         if self.formatter:
@@ -658,8 +662,10 @@ class Classifier(BaseClassifier):
         output = self.model(x_batch)
         if type(output) is tuple:
             output = output[0]
-        predictions = argmax(output, dim=1)
-        return predictions
+        if not probabilities:
+            return argmax(output, dim=1)
+        else:
+            return output
 
     def _compute_loss(
             self,
@@ -894,6 +900,12 @@ class Classifier(BaseClassifier):
                 if msg:
                     print(msg)
                 n_steps += 1
+        print("Maximum number of epochs reached; stopping early.")
+        print(
+            f"Training loss: {training_losses[-1]:.5f}. "
+            f"Validation loss: {validation_losses[-1]:.5f}. "
+            f"Patience: {patience}"
+        )
         f = list(np.array(average_f_scores).T)
         p = list(np.array(average_p_scores).T)
         return training_losses, validation_losses, f, p
