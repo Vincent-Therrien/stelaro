@@ -47,3 +47,6 @@ documentation/_templates/
 
 # Sample data
 data/*
+
+# Trained models
+*.pt2
