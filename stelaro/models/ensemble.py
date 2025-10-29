@@ -12,11 +12,18 @@ from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
 from torch.optim import Adam
-from torch import save, load, argmax, tensor
+from torch import save, load, argmax, tensor, zeros
 from torch.nn import CrossEntropyLoss
 from torch.nn.functional import softmax
 
-from . import BaseClassifier, Classifier, SyntheticMultiLevelTetramerDataset
+from . import (
+    BaseClassifier,
+    Classifier,
+    SyntheticTetramerDataset,
+    SyntheticMultiLevelTetramerDataset,
+    CustomTetramerDataset,
+    confusion_matrix
+)
 
 
 class HierarchicalClassifier(BaseClassifier):
@@ -230,3 +237,227 @@ class HierarchicalClassifier(BaseClassifier):
                 True
             )
             self.models[selection].model.load_state_dict(load(f"{dir}{i}.pt2"))
+
+
+class BottomUpClassifier(BaseClassifier):
+    """A collection of neural networks classifying reads."""
+    def __init__(
+            self,
+            length: int,
+            mapping: dict,
+            device: str,
+            neural_network: any,
+            formatter: Callable,
+            ):
+        """
+        Args:
+            length: Length of the sequences processed by the model.
+            mapping: Dictionary mapping a taxon to an index.
+            device: Device onto which run computations.
+            model_builder: Neural network (e.g. PyTorch Module).
+            formatter: Function that converts the default input (tetramers)
+                into another format. If `None`, tetramers are used as input.
+        """
+        self.length = length
+        self.neural_network = neural_network
+        self.device = device
+        self.mapping = mapping
+        self.formatter = formatter
+        self.models = {}
+
+    def predict(self, x_batch) -> list[int]:
+        predictions = []
+        for indices, model in self.models.items():
+            prediction = softmax(model.predict(x_batch.long().to(self.device), True), dim=0)
+            if indices:
+                normalized_prediction = zeros(len(self.mapping))
+                j = 0
+                for i in indices:
+                    normalized_prediction[i] = prediction[j]
+                    j += 1
+                predictions.append(normalized_prediction)
+            else:
+                predictions.append(prediction)
+        logits = predictions[0]
+        for p in predictions[1:]:
+            logits *= p
+        return argmax(logits, dim=0)
+
+    def train(self,
+            train_data_path: str,
+            validate_data_path: str,
+            patience: int,
+            loss_function_type: str,
+            evaluation_interval: int = 5000,
+            evaluation_maximum_duration: float = 30,
+            patience_interval: int = 1000,
+            n_max_steps: int = 100_000,
+            batch_size: int = 128,
+            epochs: int = 10,
+            n_max_models: int = 3
+            ) -> None:
+        """Train a hierarchical ensemble of models.
+
+        Args:
+            train_data_path: Training data.
+            validate_data_path: Validation data.
+            optimizer: Model optimizer.
+            patience: Maximum amount of times that the validation loss is
+                allowed to increase before early stop.
+            loss_function_type: Type of training (supervised, unsupervised,
+                semi-supervised).
+            evaluation_interval: Number of steps between evaluations.
+            evaluation_maximum_duration: Maximum number of seconds to perform
+                an evaluation.
+            patience_interval: Number of steps to modify the patience.
+            n_max_steps: Maximum number of steps for each model.
+        """
+        self.models[()] = self._add_model(
+            list(range(len(self.mapping))),
+            train_data_path,
+            validate_data_path,
+            patience,
+            loss_function_type,
+            evaluation_interval,
+            evaluation_maximum_duration,
+            patience_interval,
+            n_max_steps,
+            batch_size,
+            epochs
+        )
+        for _ in range(n_max_models):
+            indices = self._plan_new_model(validate_data_path, batch_size)
+            self.models[tuple(indices)] = self._add_model(
+                indices,
+                train_data_path,
+                validate_data_path,
+                patience,
+                loss_function_type,
+                evaluation_interval,
+                evaluation_maximum_duration,
+                patience_interval,
+                n_max_steps,
+                batch_size,
+                epochs
+            )
+
+    def _plan_new_model(self, validate_data_path, batch_size) -> list[int]:
+        validate_loader = DataLoader(
+            SyntheticTetramerDataset(
+                validate_data_path,
+            ),
+            batch_size=batch_size,
+            shuffle=True
+        )
+        confusion = confusion_matrix(self, validate_loader, "cuda", self.mapping)
+        true_class_counts = confusion.sum(axis=1)
+        normalized = confusion / true_class_counts[:, np.newaxis]
+        for i in range(len(normalized)):
+            normalized[i][i] = 0
+        # TMP
+        phyla = {}
+        for index, name in self.mapping.items():
+            phylum = tuple(name[:-1])
+            if phylum in phyla:
+                phyla[phylum].append(int(index))
+            else:
+                phyla[phylum] = [int(index)]
+        worst = float("-inf")
+        for name, indices in phyla.items():
+            c = normalized[indices].sum()
+            if c > worst:
+                target_taxon = name
+                worst = c
+        indices = []
+        for i, m in self.mapping.items():
+            if m == target_taxon:
+                indices.append(int(i))
+        return indices
+
+    def _add_model(
+            self,
+            indices: list[int],
+            train_data_path: str,
+            validate_data_path: str,
+            patience: int,
+            loss_function_type: str,
+            evaluation_interval: int = 5000,
+            evaluation_maximum_duration: float = 30,
+            patience_interval: int = 1000,
+            n_max_steps: int = 100_000,
+            batch_size: int = 128,
+            epochs: int = 10
+            ):
+        train_loader = DataLoader(
+            CustomTetramerDataset(
+                train_data_path,
+                self.mapping,
+                indices,
+                other_factor = 2.0
+            ),
+            batch_size=batch_size,
+            shuffle=True
+        )
+        validate_loader = DataLoader(
+            CustomTetramerDataset(
+                validate_data_path,
+                self.mapping,
+                indices,
+                other_factor = 2.0
+            ),
+            batch_size=batch_size,
+            shuffle=True
+        )
+        new_mapping = validate_loader.dataset.mapping
+        new_model = Classifier(
+            self.length,
+            new_mapping,
+            self.device,
+            self.neural_network,
+            self.formatter,
+            True
+        )
+        new_model.train(
+            train_loader,
+            validate_loader,
+            Adam(new_model.get_parameters(), lr=0.001),
+            max_n_epochs=epochs,
+            patience=patience,
+            loss_function=CrossEntropyLoss(),
+            loss_function_type=loss_function_type,
+            evaluation_interval=evaluation_interval,
+            evaluation_maximum_duration=evaluation_maximum_duration,
+            patience_interval=patience_interval,
+            n_max_steps=n_max_steps
+        )
+        return new_model
+
+    def save(self, dir: str) -> None:
+        model_index = {}
+        i = 0
+        for indices, model in self.models.items():
+            model_index[str(i)] = {
+                "indices": indices,
+                "mapping": model.mapping
+            }
+            save(model.model.state_dict(), f"{dir}{i}.pt2")
+            i += 1
+        with open(f"{dir}mapping.json", "w") as file:
+            json.dump(model_index, file, indent=4)
+
+    def load(self, dir: str) -> None:
+        with open(f"{dir}mapping.json", "r") as file:
+            model_index = json.load(file)
+        self.models = {}
+        for i, model_information in model_index:
+            indices = tuple(model_information["indices"])
+            mapping = model_information["mapping"]
+            self.models[indices] = Classifier(
+                self.length,
+                mapping,
+                self.device,
+                self.neural_network,
+                self.formatter,
+                True
+            )
+            self.models[indices].model.load_state_dict(load(f"{dir}{i}.pt2"))

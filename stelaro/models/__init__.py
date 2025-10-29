@@ -103,7 +103,7 @@ class SyntheticTetramerDataset(Dataset):
 
 
 class SyntheticMultiLevelTetramerDataset(Dataset):
-    """Dataset containing one-hot encoded synthetic reads."""
+    """Dataset containing tetramer-encoded synthetic reads."""
     def __init__(
             self,
             directory: str,
@@ -165,6 +165,89 @@ class SyntheticMultiLevelTetramerDataset(Dataset):
         for i in range(len(mapping)):
             if self.conversion_table[i] == -1:
                 self.conversion_table[i] = len(taxa) - 1
+        if other_factor:
+            self.balance(directory, memory_mapping, other_factor)
+        else:
+            self.x = np.load(directory + "x.npy", mmap_mode=memory_mapping)
+            self.y = np.load(directory + "y.npy", mmap_mode=memory_mapping)
+            self.y = self.conversion_table[self.y]
+
+    def balance(
+            self,
+            directory: str,
+            memory_mapping: str,
+            other_factor: float
+            ):
+        x = np.load(directory + "x.npy", mmap_mode=memory_mapping)
+        y = np.load(directory + "y.npy", mmap_mode=memory_mapping)
+        y = self.conversion_table[y]
+        unique_values, counts = np.unique(y, return_counts = True)
+        non_other_counts = counts[:-1]
+        second_biggest = sorted(non_other_counts, reverse=True)[0]
+        N = int(second_biggest * other_factor)
+        total_points = 0
+        for count in counts:
+            if count < N:
+                total_points += count
+            else:
+                total_points += N
+        L = len(x[0])
+        self.x = np.zeros((total_points, L), dtype=np.uint8)
+        self.y = np.zeros(total_points, dtype=np.uint16)
+        indices = list(range(len(y)))
+        shuffle(indices)
+        amounts = {}
+        for v in unique_values:
+            amounts[v] = 0
+        i = 0
+        for index in indices:
+            label = int(y[index])
+            if amounts[label] < N:
+                self.x[i] = x[index]
+                self.y[i] = label
+                i += 1
+                amounts[label] += 1
+
+    def __len__(self):
+        return len(self.y)
+
+    def __getitem__(self, idx):
+        return tensor(self.x[idx]), tensor(self.y[idx])
+
+
+class CustomTetramerDataset(Dataset):
+    """Dataset containing tetramer-encoded synthetic reads."""
+    def __init__(
+            self,
+            directory: str,
+            mapping: dict,
+            indices: list[int],
+            memory_mapping: str = None,
+            other_factor: float = None,
+        ):
+        """Args:
+            directory: Path of the directory that contains the x and y files.
+            mapping: Dictionary mapping indices to taxa.
+            indices: List of indices in the original classes to preserve.
+            memory_mapping: Either `None` (all in main memory) or `"r"`
+                (memory-mapped, useful for very large datasets).
+            other_factor: If set, keep taxa that do not belong to the
+                selection at most `other_factor` times the number of
+                occurrences of the second most frequent class.
+        """
+        self.conversion_table = tensor([i for i in range(len(mapping))])
+        floor = 0
+        self.mapping = {}
+        for index in range(len(mapping)):
+            if index in indices:
+                taxon = tuple(mapping[str(index)])
+                new_index = floor
+                floor += 1
+            else:
+                taxon = "other"
+                new_index = len(indices)
+            self.mapping[taxon] = new_index
+            self.conversion_table[index] = new_index
         if other_factor:
             self.balance(directory, memory_mapping, other_factor)
         else:
