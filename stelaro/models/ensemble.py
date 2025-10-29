@@ -14,6 +14,7 @@ import numpy as np
 from torch.optim import Adam
 from torch import save, load, argmax, tensor
 from torch.nn import CrossEntropyLoss
+from torch.nn.functional import softmax
 
 from . import BaseClassifier, Classifier, SyntheticMultiLevelTetramerDataset
 
@@ -49,7 +50,7 @@ class HierarchicalClassifier(BaseClassifier):
     def predict(self, x_batch) -> list[int]:
         predictions = {}
         for selection in self.models:
-            predictions[selection] = self.models[selection].predict(x_batch.long().to(self.device), True)
+            predictions[selection] = softmax(self.models[selection].predict(x_batch.long().to(self.device), True), dim=0)
         hierarchical_predictions = {}
         for taxon_id, lineage in self.mapping.items():
             hierarchical_predictions[taxon_id] = []
@@ -64,8 +65,9 @@ class HierarchicalClassifier(BaseClassifier):
                 hierarchical_predictions[taxon_id].append(value)
         logits = []
         for h in hierarchical_predictions:
-            logits.append(sum(hierarchical_predictions[h]))
-        return argmax(tensor(logits))
+            logits.append(sum(hierarchical_predictions[h]).detach().cpu().numpy())
+        logits = tensor(np.array(logits))
+        return argmax(logits, dim=0)
 
     def train(self,
             train_data_path: str,
@@ -77,6 +79,7 @@ class HierarchicalClassifier(BaseClassifier):
             patience_interval: int = 1000,
             n_max_steps: int = 100_000,
             batch_size: int = 128,
+            epochs: int = 10
             ) -> None:
         """Train a hierarchical ensemble of models.
 
@@ -133,7 +136,8 @@ class HierarchicalClassifier(BaseClassifier):
                     evaluation_maximum_duration,
                     patience_interval,
                     n_max_steps,
-                    batch_size
+                    batch_size,
+                    epochs
                 )
 
     def _add_model(
@@ -147,7 +151,8 @@ class HierarchicalClassifier(BaseClassifier):
             evaluation_maximum_duration: float = 30,
             patience_interval: int = 1000,
             n_max_steps: int = 100_000,
-            batch_size: int = 128
+            batch_size: int = 128,
+            epochs: int = 10
             ):
         """
         """
@@ -188,7 +193,7 @@ class HierarchicalClassifier(BaseClassifier):
             train_loader,
             validate_loader,
             Adam(self.models[selection].get_parameters(), lr=0.001),
-            max_n_epochs=10,
+            max_n_epochs=epochs,
             patience=patience,
             loss_function=CrossEntropyLoss(),
             loss_function_type=loss_function_type,

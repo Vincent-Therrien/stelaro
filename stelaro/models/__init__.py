@@ -17,6 +17,7 @@ from torch.nn import functional
 from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils import clip_grad_norm_
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 from time import time
 
 
@@ -457,6 +458,42 @@ def evaluate(classifier, loader, device, mapping, time_limit: float = None):
     return collapsed
 
 
+def benchmark_classifier(classifier, loader, device, mapping, time_limit: float = 10_000):
+    mappings = obtain_rank_based_mappings(mapping)
+    predicted_y = []
+    real_y = []
+    a = time()
+    n = 0
+    with no_grad():
+        for x_batch, y_batch in tqdm(loader):
+            n += len(y_batch)
+            x_batch = x_batch.long().to(device)
+            y_batch = y_batch.to("cpu")
+            predictions = classifier.predict(x_batch)
+            predicted_y += predictions
+            real_y += y_batch
+            if time() - a > time_limit:
+                print(f"Halting evaluation after {n} data points.")
+                break
+
+    def collapse(v):
+        collapsed = []
+        for rank in v[::-1]:
+            collapsed.append(np.mean(rank))
+        return collapsed
+
+    f1 = collapse(rank_based_f1_score(mappings, real_y, predicted_y))
+    print(f"F1 score: {f1}")
+    macro = collapse(rank_based_precision(mappings, real_y, predicted_y, "macro"))
+    print(f"Macro precision score: {macro}")
+    weighted = collapse(rank_based_precision(mappings, real_y, predicted_y, "weighted"))
+    print(f"Weighted precision score: {weighted}")
+    matrix = np.zeros((len(mapping), len(mapping)))
+    for y, p in zip(real_y, predicted_y):
+        matrix[y][p] += 1
+    plt.matshow(matrix)
+    plt.show()
+
 def rank_based_precision(
         mappings: dict,
         target: list[int],
@@ -880,6 +917,7 @@ class Classifier(BaseClassifier):
                             validate_loader,
                             loss_function_type,
                             loss_function,
+                            time_limit=evaluation_maximum_duration
                         )
                     )
                     if len(validation_losses) > 1:
@@ -892,20 +930,20 @@ class Classifier(BaseClassifier):
                     msg += f"Validation loss: {validation_losses[-1]:.5f}. "
                     msg += f"Patience: {patience}"
                     if patience <= 0 or n_steps >= n_max_steps:
-                        print("Stopping early.")
                         print(msg)
+                        print("Stopping early.")
                         f = list(np.array(average_f_scores).T)
                         p = list(np.array(average_p_scores).T)
                         return training_losses, validation_losses, f, p
                 if msg:
                     print(msg)
                 n_steps += 1
-        print("Maximum number of epochs reached; stopping early.")
         print(
             f"Training loss: {training_losses[-1]:.5f}. "
             f"Validation loss: {validation_losses[-1]:.5f}. "
             f"Patience: {patience}"
         )
+        print("Maximum number of epochs reached; stopping early.")
         f = list(np.array(average_f_scores).T)
         p = list(np.array(average_p_scores).T)
         return training_losses, validation_losses, f, p
