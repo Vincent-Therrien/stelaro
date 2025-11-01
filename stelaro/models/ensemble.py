@@ -12,9 +12,11 @@ from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
 from torch.optim import Adam
-from torch import save, load, argmax, tensor, zeros
+from torch import save, load, argmax, tensor, ones, zeros
 from torch.nn import CrossEntropyLoss
 from torch.nn.functional import softmax
+
+import matplotlib.pyplot as plt
 
 from . import (
     BaseClassifier,
@@ -22,7 +24,8 @@ from . import (
     SyntheticTetramerDataset,
     SyntheticMultiLevelTetramerDataset,
     CustomTetramerDataset,
-    confusion_matrix
+    confusion_matrix,
+    evaluate_precision
 )
 
 
@@ -57,7 +60,7 @@ class HierarchicalClassifier(BaseClassifier):
     def predict(self, x_batch) -> list[int]:
         predictions = {}
         for selection in self.models:
-            predictions[selection] = softmax(self.models[selection].predict(x_batch.long().to(self.device), True), dim=0)
+            predictions[selection] = softmax(self.models[selection].predict(x_batch.long().to(self.device), True), dim=1)
         hierarchical_predictions = {}
         for taxon_id, lineage in self.mapping.items():
             hierarchical_predictions[taxon_id] = []
@@ -265,35 +268,37 @@ class BottomUpClassifier(BaseClassifier):
         self.formatter = formatter
         self.models = {}
 
+    def get_parameters(self):
+        return None
+
     def predict(self, x_batch) -> list[int]:
         predictions = []
         for indices, model in self.models.items():
-            prediction = softmax(model.predict(x_batch.long().to(self.device), True), dim=0)
+            prediction = softmax(model.predict(x_batch.long().to(self.device), True), dim=1)
             if indices:
-                normalized_prediction = zeros(len(self.mapping))
+                normalized_prediction = predictions[0].detach().clone()
                 j = 0
                 for i in indices:
-                    normalized_prediction[i] = prediction[j]
+                    normalized_prediction[:, i] = prediction[:, j]
                     j += 1
                 predictions.append(normalized_prediction)
             else:
                 predictions.append(prediction)
-        logits = predictions[0]
+        logits = predictions[0].to("cpu")
         for p in predictions[1:]:
-            logits *= p
-        return argmax(logits, dim=0)
+            logits += p.to("cpu")
+        return argmax(logits, dim=1)
 
     def train(self,
             train_data_path: str,
             validate_data_path: str,
-            patience: int,
-            loss_function_type: str,
+            patience: int = 3,
+            max_n_epochs: int = 10,
             evaluation_interval: int = 5000,
             evaluation_maximum_duration: float = 30,
             patience_interval: int = 1000,
             n_max_steps: int = 100_000,
             batch_size: int = 128,
-            epochs: int = 10,
             n_max_models: int = 3
             ) -> None:
         """Train a hierarchical ensemble of models.
@@ -317,13 +322,13 @@ class BottomUpClassifier(BaseClassifier):
             train_data_path,
             validate_data_path,
             patience,
-            loss_function_type,
+            "supervised",
             evaluation_interval,
             evaluation_maximum_duration,
             patience_interval,
             n_max_steps,
             batch_size,
-            epochs
+            max_n_epochs
         )
         for _ in range(n_max_models):
             indices = self._plan_new_model(validate_data_path, batch_size)
@@ -332,13 +337,13 @@ class BottomUpClassifier(BaseClassifier):
                 train_data_path,
                 validate_data_path,
                 patience,
-                loss_function_type,
+                "supervised",
                 evaluation_interval,
                 evaluation_maximum_duration,
                 patience_interval,
                 n_max_steps,
                 batch_size,
-                epochs
+                max_n_epochs
             )
 
     def _plan_new_model(self, validate_data_path, batch_size) -> list[int]:
@@ -349,11 +354,14 @@ class BottomUpClassifier(BaseClassifier):
             batch_size=batch_size,
             shuffle=True
         )
-        confusion = confusion_matrix(self, validate_loader, "cuda", self.mapping)
+        confusion = confusion_matrix(self, validate_loader, self.device, self.mapping)
         true_class_counts = confusion.sum(axis=1)
         normalized = confusion / true_class_counts[:, np.newaxis]
         for i in range(len(normalized)):
             normalized[i][i] = 0
+        plt.matshow(normalized)
+        plt.show()
+        print(evaluate_precision(self, validate_loader, self.device, self.mapping))
         # TMP
         phyla = {}
         for index, name in self.mapping.items():
@@ -362,17 +370,28 @@ class BottomUpClassifier(BaseClassifier):
                 phyla[phylum].append(int(index))
             else:
                 phyla[phylum] = [int(index)]
+        if () in phyla:
+            del phyla[()]
+
+        def get_indices(target_taxon) -> tuple[int]:
+            indices = []
+            for i, m in self.mapping.items():
+                phylum = tuple(m[:-1])
+                if phylum == target_taxon:
+                    indices.append(int(i))
+            return tuple(indices)
+
         worst = float("-inf")
-        for name, indices in phyla.items():
-            c = normalized[indices].sum()
-            if c > worst:
+        for name, phylum_indices in phyla.items():
+            phylum_loss = normalized[phylum_indices].sum() / len(phylum_indices)
+            indices = get_indices(name)
+            if phylum_loss > worst and indices not in self.models:
                 target_taxon = name
-                worst = c
-        indices = []
-        for i, m in self.mapping.items():
-            if m == target_taxon:
-                indices.append(int(i))
-        return indices
+                worst = phylum_loss
+                target_indices = indices
+
+        print(f"Phylum {target_taxon}. Planned {target_indices}")
+        return target_indices
 
     def _add_model(
             self,
@@ -388,27 +407,40 @@ class BottomUpClassifier(BaseClassifier):
             batch_size: int = 128,
             epochs: int = 10
             ):
-        train_loader = DataLoader(
-            CustomTetramerDataset(
-                train_data_path,
-                self.mapping,
-                indices,
-                other_factor = 2.0
-            ),
-            batch_size=batch_size,
-            shuffle=True
-        )
-        validate_loader = DataLoader(
-            CustomTetramerDataset(
-                validate_data_path,
-                self.mapping,
-                indices,
-                other_factor = 2.0
-            ),
-            batch_size=batch_size,
-            shuffle=True
-        )
-        new_mapping = validate_loader.dataset.mapping
+        if len(indices) == len(self.mapping):
+            train_loader = DataLoader(
+                SyntheticTetramerDataset(train_data_path),
+                batch_size=batch_size,
+                shuffle=True
+            )
+            validate_loader = DataLoader(
+                SyntheticTetramerDataset(validate_data_path),
+                batch_size=batch_size,
+                shuffle=True
+            )
+            new_mapping = self.mapping
+        else:
+            train_loader = DataLoader(
+                CustomTetramerDataset(
+                    train_data_path,
+                    self.mapping,
+                    indices,
+                    other_factor = 2.0
+                ),
+                batch_size=batch_size,
+                shuffle=True
+            )
+            validate_loader = DataLoader(
+                CustomTetramerDataset(
+                    validate_data_path,
+                    self.mapping,
+                    indices,
+                    other_factor = 2.0
+                ),
+                batch_size=batch_size,
+                shuffle=True
+            )
+            new_mapping = validate_loader.dataset.mapping
         new_model = Classifier(
             self.length,
             new_mapping,
@@ -417,6 +449,9 @@ class BottomUpClassifier(BaseClassifier):
             self.formatter,
             True
         )
+        n_expected_steps = len(train_loader)
+        if n_expected_steps < 2000:
+            patience = 1
         new_model.train(
             train_loader,
             validate_loader,
@@ -438,7 +473,7 @@ class BottomUpClassifier(BaseClassifier):
         for indices, model in self.models.items():
             model_index[str(i)] = {
                 "indices": indices,
-                "mapping": model.mapping
+                "mapping": {str(v): k for k, v in model.mapping.items()}
             }
             save(model.model.state_dict(), f"{dir}{i}.pt2")
             i += 1
@@ -449,9 +484,10 @@ class BottomUpClassifier(BaseClassifier):
         with open(f"{dir}mapping.json", "r") as file:
             model_index = json.load(file)
         self.models = {}
-        for i, model_information in model_index:
+        for i, model_information in model_index.items():
             indices = tuple(model_information["indices"])
             mapping = model_information["mapping"]
+            mapping = {v: k for k, v in mapping.items()}
             self.models[indices] = Classifier(
                 self.length,
                 mapping,

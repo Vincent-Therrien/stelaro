@@ -246,7 +246,7 @@ class CustomTetramerDataset(Dataset):
             else:
                 taxon = "other"
                 new_index = len(indices)
-            self.mapping[taxon] = new_index
+            self.mapping[str(new_index)] = taxon
             self.conversion_table[index] = new_index
         if other_factor:
             self.balance(directory, memory_mapping, other_factor)
@@ -453,7 +453,7 @@ def obtain_rank_based_mappings(mapping: dict) -> list[dict]:
         keys.append(set())
         mappings.append({})
         for j, labels in mapping.items():
-            if labels == ["unknown", ]:
+            if labels in (["unknown", ], ("unknown", ), "other"):
                 label = "unknown"
                 assert label not in keys, "Unexpected unknown taxon."
                 keys[-1].add(label)
@@ -1014,7 +1014,10 @@ class Classifier(BaseClassifier):
                     msg += f"Patience: {patience}"
                     if patience <= 0 or n_steps >= n_max_steps:
                         print(msg)
-                        print("Stopping early.")
+                        if n_steps >= n_max_steps:
+                            print("Reached the maximum number of steps.")
+                        else:
+                            print("Stopping early.")
                         f = list(np.array(average_f_scores).T)
                         p = list(np.array(average_p_scores).T)
                         return training_losses, validation_losses, f, p
