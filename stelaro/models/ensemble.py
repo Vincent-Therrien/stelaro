@@ -272,21 +272,19 @@ class BottomUpClassifier(BaseClassifier):
         return None
 
     def predict(self, x_batch) -> list[int]:
-        predictions = []
+        """"Classify reads by combining general and specialized models."""
+        prediction = softmax(self.models[()].predict(x_batch.long().to(self.device), True), dim=1)
+        normalized_prediction = prediction.detach().clone()
         for indices, model in self.models.items():
-            prediction = softmax(model.predict(x_batch.long().to(self.device), True), dim=1)
-            if indices:
-                normalized_prediction = predictions[0].detach().clone()
-                j = 0
-                for i in indices:
-                    normalized_prediction[:, i] = prediction[:, j]
-                    j += 1
-                predictions.append(normalized_prediction)
-            else:
-                predictions.append(prediction)
-        logits = predictions[0].to("cpu")
-        for p in predictions[1:]:
-            logits += p.to("cpu")
+            if indices == ():
+                continue
+            j = 0
+            p = softmax(model.predict(x_batch.long().to(self.device), True), dim=1)
+            for i in indices:
+                normalized_prediction[:, i] = p[:, j]
+                j += 1
+        logits = prediction.to("cpu")
+        logits += normalized_prediction.to("cpu")
         return argmax(logits, dim=1)
 
     def train(self,
@@ -452,6 +450,11 @@ class BottomUpClassifier(BaseClassifier):
         n_expected_steps = len(train_loader)
         if n_expected_steps < 2000:
             patience = 1
+        if n_expected_steps > 15000:
+            patience = 4
+        parameters = new_model.get_parameters()
+        total_params = sum(param.numel() for param in parameters)
+        print(f"Number of parameters: {total_params:_}")
         new_model.train(
             train_loader,
             validate_loader,
