@@ -451,7 +451,7 @@ class BottomUpClassifier(BaseClassifier):
         if n_expected_steps < 2000:
             patience = 1
         if n_expected_steps > 15000:
-            patience = 4
+            patience = 6
         parameters = new_model.get_parameters()
         total_params = sum(param.numel() for param in parameters)
         print(f"Number of parameters: {total_params:_}")
