@@ -50,3 +50,4 @@ data/*
 
 # Trained models
 *.pt2
+demonstrations/trained_models/
