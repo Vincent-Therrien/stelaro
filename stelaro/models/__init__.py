@@ -694,7 +694,8 @@ def mask_tokens(
         mask_id,
         vocab_size,
         mlm_probability: float = 0.15,
-        mask_fraction: float = 1.0
+        mask_fraction: float = 0.8,
+        order: str = "mlm"
         ):
     """Prepare masked input and MLM labels for MLM pretraining.
 
@@ -703,32 +704,56 @@ def mask_tokens(
         mask_id: Token used for masking.
         vocab_size: Vocabulary size excluding the masking token.
         mlm_probability: Fraction of input tokens to be manipulated for MLM.
-        mask_fraction: Fraction of tokens manipultated by the `mlm_prabability`
+        mask_fraction: Fraction of tokens manipulated by the `mlm_prabability`
             parameter that will be masked. Non-masked tokens will be randomly
             modified (50 %) or left unchanged (50 %).
+        order: Way to mask the tokens. If `mlm`, will select random
+            tokens as in BERT training. If `causal`, will select the last
+            tokens of the sequence.
 
     Returns:
       masked_x: [B, L] (masked input)
       mlm_labels: [B, L] (original ids, or -1 for unmasked positions)
     """
-    labels = x.clone()
-    probability_matrix = torch.full(labels.shape, mlm_probability, device=x.device)
-    mask = torch.bernoulli(probability_matrix).bool()
-    mlm_labels = labels.clone()
     MASKING_LABEL = -1
-    mlm_labels[~mask] = MASKING_LABEL
-    indices_replaced = torch.bernoulli(
-        torch.full(labels.shape, mask_fraction, device=x.device)
-    ).bool() & mask
-    modified_x = x.clone()
-    modified_x[indices_replaced] = mask_id
-    indices_random = torch.bernoulli(
-        torch.full(labels.shape, 0.5, device=x.device)
-    ).bool() & mask & ~indices_replaced
-    random_tokens = torch.randint(
-        0, vocab_size, labels.shape, dtype=torch.long, device=x.device
-    )
-    modified_x[indices_random] = random_tokens[indices_random]
+    labels = x.clone()
+    if order == "mlm":
+        probability_matrix = torch.full(labels.shape, mlm_probability, device=x.device)
+        mask = torch.bernoulli(probability_matrix).bool()
+        mlm_labels = labels.clone()
+        mlm_labels[~mask] = MASKING_LABEL
+        indices_replaced = torch.bernoulli(
+            torch.full(labels.shape, mask_fraction, device=x.device)
+        ).bool() & mask
+        modified_x = x.clone()
+        modified_x[indices_replaced] = mask_id
+        indices_random = torch.bernoulli(
+            torch.full(labels.shape, 0.5, device=x.device)
+        ).bool() & mask & ~indices_replaced
+        random_tokens = torch.randint(
+            0, vocab_size, labels.shape, dtype=torch.long, device=x.device
+        )
+        modified_x[indices_random] = random_tokens[indices_random]
+    elif order == "causal":
+        mask = torch.zeros(labels.shape, dtype=torch.bool, device=x.device)
+        L = labels.shape[1]
+        n_last = int(L * mlm_probability)
+        mask[:, -n_last:] = True
+        mlm_labels = labels.clone()
+        mlm_labels[~mask] = MASKING_LABEL
+        indices_replaced = torch.ones(labels.shape, device=x.device).bool() & mask
+        modified_x = x.clone()
+        modified_x[indices_replaced] = mask_id
+    elif order == "anti-causal":
+        mask = torch.zeros(labels.shape, dtype=torch.bool, device=x.device)
+        L = labels.shape[1]
+        n_last = int(L * mlm_probability)
+        mask[:, :n_last] = True
+        mlm_labels = labels.clone()
+        mlm_labels[~mask] = MASKING_LABEL
+        indices_replaced = torch.ones(labels.shape, device=x.device).bool() & mask
+        modified_x = x.clone()
+        modified_x[indices_replaced] = mask_id
     return modified_x, mlm_labels
 
 
@@ -754,10 +779,7 @@ class Classifier(BaseClassifier):
             clip: If `True`, clip gradients to 1.0.
         """
         self.length = length
-        if model:
-            self.model = model(length, len(mapping)).to(device)
-        else:
-            self.model = None
+        self.model = model.to(device)
         self.device = device
         self.mapping = mapping
         self.formatter = formatter
@@ -818,7 +840,8 @@ class Classifier(BaseClassifier):
             vocab_size: int,
             evaluation_interval: int = 500,
             patience: int = 2,
-            mlm_probability: float = 0.15
+            probability: float = 0.15,
+            pretraining_type: str = "mlm",
             ) -> None:
         """Pretrain a neural network with masked language modelling (MLM).
 
@@ -829,13 +852,15 @@ class Classifier(BaseClassifier):
             vocab_size: Vocabulary size EXCLUDING the masking token.
             evaluation interval: Number of steps between evaluations.
             patience: Maximum increasing loss number before early stop.
-            mlm_probability: Fraction of masked tokens.
+            probability: Fraction of masked tokens.
+            pretraining_type: Type of pretraining (mlm or clm)
         """
         num_batches, evaluation_n_batches = 0, 0
         lowest_loss = float("inf")
         total_loss = 0.0
         n_identicals, denominator = 0, 0
         entropies = 0.0
+        avg_losses = []
         for epoch in range(1000):
             self.model.train()
             for x_batch in tqdm(train_loader):
@@ -845,7 +870,8 @@ class Classifier(BaseClassifier):
                     x_batch.clone(),
                     vocab_size,
                     vocab_size=256,
-                    mlm_probability=mlm_probability
+                    mlm_probability=probability,
+                    order=pretraining_type
                 )
                 logits_mlm = self.model(masked_x, mlm_labels)
                 loss = torch.nn.functional.cross_entropy(
@@ -853,10 +879,10 @@ class Classifier(BaseClassifier):
                     mlm_labels.view(-1),
                     ignore_index=-1,
                 )
+                total_loss += loss.item()
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
-                total_loss += loss.item()
                 num_batches += 1
                 evaluation_n_batches += 1
                 with torch.no_grad():
@@ -866,27 +892,29 @@ class Classifier(BaseClassifier):
                     num_identical = (predictions == mlm_labels).sum().item()
                     n_identicals += num_identical
                     denominator += (mlm_labels != -1).sum().item()
-                if num_batches % evaluation_interval == 0:
+                if num_batches % evaluation_interval == 0 or num_batches == 1:
                     avg_loss = total_loss / evaluation_n_batches
                     if lowest_loss < avg_loss:
                         patience -= 1
                     else:
                         lowest_loss = avg_loss
-                    print(f"Step: {num_batches}. Epoch: {epoch+1}. MLM loss: {avg_loss:.4f}. Patience: {patience}")
+                    avg_losses.append(avg_loss)
                     entropy = entropies.item() / evaluation_n_batches
-                    print(f"Average entropy: {entropy:.5}. ", end="")
                     n = n_identicals
                     d = denominator
-                    print(f"Correct predictions: {n} / {d} ({100.0 * n / d:.5} %).")
+                    print(f"Step: {num_batches}. Epoch: {epoch+1}. "
+                        + f"Loss: {avg_loss:.4f}. Entropy: {entropy:.5}. "
+                        + f"Patience: {patience}. Correct pred.: {100.0 * n / d:.5} %")
                     n_identicals, denominator, entropies = 0, 0, 0
                     if patience <= 0:
                         print("Overfitting; stopping early.")
-                        return
+                        return avg_losses
                     total_loss = 0.0
                     evaluation_n_batches = 0
                 if num_batches > max_batches:
                     print("Performed enough steps.")
-                    return
+                    return avg_losses
+        return avg_losses
 
     def _get_validation_loss(
             self,
