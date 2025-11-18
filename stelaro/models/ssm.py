@@ -109,7 +109,7 @@ class GlobalMambaSequenceClassifier(nn.Module):
         dropout: float = 0.1,
     ):
         super().__init__()
-        self.embedding = nn.Embedding(vocab_size, d_model)
+        self.embedding = nn.Embedding(vocab_size + 1, d_model)
         self.layers = nn.ModuleList([
             MambaBlock(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
             for _ in range(n_layers)
@@ -129,10 +129,10 @@ class GlobalMambaSequenceClassifier(nn.Module):
         memory = self.memory_init.expand(B, -1)
 
         for i, block in enumerate(self.layers):
-            h = block(h)
+            h = block(h)  # each Mamba block returns [B, L, d_model]
             memory = self.memory_blocks[i](h, memory)
             h = h + memory.unsqueeze(1)
-        h = self.norm(h)
+        h = self.norm(h)  # [B, L, d_model]
 
         if mlm is not None:
             logits = self.mlm_head(h)  # [B, L, vocab_size + 1]
@@ -142,3 +142,77 @@ class GlobalMambaSequenceClassifier(nn.Module):
             pooled = self.dropout(pooled)
             logits = self.classifier(pooled)  # [B, num_classes]
             return logits
+
+
+class DownsamplingCNNTokenizer(nn.Module):
+    """
+    CNN front-end that converts one-hot nucleotide sequences [B, L, 4]
+    into a downsampled token sequence [B, L_reduced, d_model].
+    """
+    def __init__(
+        self,
+        in_channels=4,
+        d_model=128,
+        n_layers=2,
+        kernel_size=9,
+        downsample_factor=4,  # total reduction ratio
+    ):
+        super().__init__()
+
+        layers = []
+        c = in_channels
+        current_factor = 1
+
+        for i in range(n_layers):
+            stride = 2 if current_factor < downsample_factor else 1
+            current_factor *= stride
+
+            layers += [
+                nn.Conv1d(c, d_model, kernel_size,
+                          stride=stride, padding=kernel_size // 2),
+                nn.ReLU(),
+                nn.BatchNorm1d(d_model)
+            ]
+            c = d_model
+
+        self.net = nn.Sequential(*layers)
+        self.final_factor = current_factor
+
+    def forward(self, x):
+        h = self.net(x)             # [B, d_model, L_reduced]
+        return h.transpose(1, 2)    # [B, L_reduced, d_model]
+
+
+class MambaSequenceClassifierCNN(nn.Module):
+    def __init__(
+        self,
+        N: int,
+        num_classes: int,
+        d_model: int = 128,
+        n_layers: int = 4,
+        d_state: int = 16,
+        d_conv: int = 4,
+        expand: int = 2,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+        self.tokenizer = DownsamplingCNNTokenizer()
+        self.layers = nn.ModuleList([
+            MambaBlock(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
+            for _ in range(n_layers)
+        ])
+        self.norm = nn.LayerNorm(d_model)
+        self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+        self.classifier = nn.Linear(d_model, num_classes)
+
+    def forward(self, x: torch.LongTensor) -> torch.Tensor:
+        h = self.tokenizer(x)
+
+        for block in self.layers:
+            h = block(h)
+
+        h = self.norm(h)
+        pooled = h.mean(dim=1)
+        pooled = self.dropout(pooled)
+        logits = self.classifier(pooled)
+        return logits
