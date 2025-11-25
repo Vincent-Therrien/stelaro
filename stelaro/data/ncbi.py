@@ -25,10 +25,11 @@ NAME_TYPE_COLUMN = 6
 
 
 def install_summaries(path: str, force: bool = False) -> None:
-    """Download reference assembly summaries.
+    """Download RefSeq reference genome assembly summaries.
 
     Args:
         path: Directory in which to install data.
+        force: If `True`, redownload data even if they are already installed.
     """
     stelaro_rust.install("ncbi", "genome_summaries", path, force)
 

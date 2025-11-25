@@ -11,7 +11,8 @@ import numpy as np
 from random import choices, randint, shuffle
 from tqdm import tqdm
 import json
-from . import read_genome
+import os.path
+from . import read_genome, format
 from torch import tensor
 from torch.utils.data import Dataset
 
@@ -20,11 +21,10 @@ NUCLEOTIDE_TO_ONEHOT = {
     'C': 0b0100,
     'G': 0b0010,
     'T': 0b0001,
-    'N': 0b0000,
 }
 ONEHOT_TO_NUCLEOTIDE = {v: k for k, v in NUCLEOTIDE_TO_ONEHOT.items()}
-SEQUENCE_TO_SAMPLE_MINIMUM_LENGTH_RATIO = 1.5
-MAXIMUM_UNDEFINED_FRACTION = 0.05
+SEQUENCE_TO_SAMPLE_MINIMUM_LENGTH_RATIO = 1.2
+MAXIMUM_UNDEFINED_FRACTION = 0.0
 
 
 def find_index_from_label(
@@ -42,6 +42,8 @@ def sample_read(
         genome: list[str],
         n_reads: int,
         length: int,
+        fasta_identifier: str = None,
+        initial_offset: int = None,
         ) -> list[int]:
     """Generate synthetic reads from a genome."""
     samples = []
@@ -52,20 +54,29 @@ def sample_read(
     sequence_lengths = []
     for i in indices:
         sequence_lengths.append(len(genome[i][1]))
-    for _ in range(n_reads):
+    if fasta_identifier:
+        fasta_lines = []
+    for current_read_id in range(n_reads):
         for _ in range(5):
             selection = choices(indices, weights=sequence_lengths, k=1)[0]
             sequence = genome[selection][1]
             cursor = randint(0, len(sequence) - length)
             sequence = sequence[cursor:cursor + length]
             fraction = sequence.count('N') / length
-            if fraction < MAXIMUM_UNDEFINED_FRACTION:
+            if fraction <= MAXIMUM_UNDEFINED_FRACTION:
                 encoding = [NUCLEOTIDE_TO_ONEHOT[s] for s in sequence]
                 samples.append(encoding)
+                if fasta_identifier:
+                    fasta_lines.append(f">{initial_offset + current_read_id} {fasta_identifier} {selection} {cursor}\n")
+                    fasta_lines.append(f"{sequence}\n")
+                    fasta_lines.append("\n")
                 break
         else:
             raise RuntimeError(f"Could not generate an acceptable read.")
-    return samples
+    if fasta_identifier:
+        return samples, fasta_lines
+    else:
+        return samples
 
 
 def write(
@@ -75,6 +86,7 @@ def write(
         reference_genome_directory: str,
         read_length: int,
         dst: str,
+        summary_filepath: str = None
         ) -> int:
     """Write a synthetic read dataset in a Numpy array.
 
@@ -90,7 +102,9 @@ def write(
         reference_genome_directory: Path of the directory that contains the
             installed reference genomes.
         read_length: Length of the synthetic reads to sample.
-        dst: Path of the file in which to write the result.
+        dst: Path of the directory in which to write the result.
+        summary_filepath: If provided, create a FASTA file that contains the
+            reference genome identifiers and synthetic reads.
 
     Returns: Number of sampled synthetic reads.
     """
@@ -109,23 +123,37 @@ def write(
     i = 0
     x = np.zeros((n_reads, read_length), dtype=np.int8)
     y = np.zeros(n_reads, dtype=np.int16)
+    if summary_filepath:
+        summary_file = open(summary_filepath, "w")
     with tqdm(total=n_reads) as progress_bar:
         for label, genome_list in dataset:
+            fasta_lines = []
             index = find_index_from_label(index_to_taxonomic_label, label)
             n_passes = index_to_n_passes[index]
             for _, sub_genome_list in genome_list:
                 for genome_id in sub_genome_list:
                     filename = f"{reference_genome_directory}{genome_id}.fna"
-                    genome = read_genome(filename)
-                    try:
-                        reads = sample_read(genome, n_passes, read_length)
-                    except Exception as e:
-                        print(f"Error on {genome_id}: {e}")
-                    for read in reads:
-                        x[i] = read
-                        y[i] = index
-                        i += 1
-                        progress_bar.update(1)
+                    if os.path.isfile(filename):
+                        genome = read_genome(filename)
+                        try:
+                            if summary_filepath:
+                                reads, lines = sample_read(genome, n_passes, read_length, genome_id, i)
+                                fasta_lines += lines
+                            else:
+                                reads = sample_read(genome, n_passes, read_length)
+                        except Exception as e:
+                            print(f"Error on {genome_id}: {e}")
+                        for read in reads:
+                            x[i] = read
+                            y[i] = index
+                            i += 1
+                            progress_bar.update(1)
+                    else:
+                        print(f"The file {filename} does not exist")
+            if summary_filepath:
+                summary_file.writelines(fasta_lines)
+    x = x[:i]
+    y = y[:i]
     np.save(f"{dst}x.npy", x)
     np.save(f"{dst}y.npy", y)
     with open(f"{dst}map.json", "w") as f:
@@ -133,81 +161,53 @@ def write(
     return i
 
 
-def sample_dataset(
-        dataset: list,
-        index_to_taxonomic_label: dict,
-        reference_genome_directory: str,
-        read_length: int,
-        n_reads: int,
-        distribution: dict,
-        ) -> tuple[np.ndarray]:
-    """Write a synthetic read dataset in a Numpy array.
+def sample_per_class(x, y, n_per_class):
+    classes = np.unique(y)
+    x_list = []
+    y_list = []
 
-    The `x` array contains one-hot encoded reads. The `y` arrays contains an
-    identifier for the origin of the corresponding read.
+    for c in classes:
+        idx = np.where(y == c)[0]
+        chosen = np.random.choice(
+            idx, size=n_per_class, replace=False
+        )
 
-    Args:
-        dataset: Maps bins to reference genomes. Generated by
-            `ncbi.bin_genomes` or `Taxonomy.bin_genomes`.
-        index_to_taxonomic_label: Maps bins to an integer identifier.
-        reference_genome_directory: Path of the directory that contains the
-            installed reference genomes.
-        read_length: Length of the synthetic reads to sample.
-        n_reads: Number of reads to sample.
-        distribution: Map a taxonomic index to a sampling frequency. Values
-            must average 1.
+        x_list.append(x[chosen])
+        y_list.append(y[chosen])
 
-    Returns: The `x` and `y` datasets.
-    """
-    # Preparation
-    assert reference_genome_directory.endswith("/")
-    assert abs(np.mean(list(distribution.values())) - 1.0) < 0.01
-    size = n_reads * read_length
-    genome_counts = {}
-    n_genomes = 0
-    for taxon in dataset:
-        label, genome_list = taxon
-        index = find_index_from_label(index_to_taxonomic_label, label)
-        genome_counts[index] = 0
-        for reference_genome in genome_list:
-            _, genomes = reference_genome
-            genome_counts[index] += len(genomes)
-            n_genomes += len(genomes)
-    print(f"Estimated size: {size / 1000000} MB.")
-    print(f"Average number of reads per bin: {n_reads / len(dataset):.2f}")
-    # Create the datasets.
-    i = 0
-    x = np.zeros((n_reads, read_length), dtype=np.int8)
-    y = np.zeros(n_reads, dtype=np.int16)
-    with tqdm(total=n_reads) as progress_bar:
-        for label, genome_list in dataset:
-            index = find_index_from_label(index_to_taxonomic_label, label)
-            n_taxon_genomes = genome_counts[index]
-            fraction = n_taxon_genomes / n_genomes
-            n_to_sample = int(n_reads * fraction * distribution[index])
-            j = 0
-            while j < n_to_sample and i < n_reads:
-                for _, sub_genome_list in genome_list:
-                    for genome_id in sub_genome_list:
-                        filename = f"{reference_genome_directory}{genome_id}.fna"
-                        genome = read_genome(filename)
-                        try:
-                            reads = sample_read(genome, 1, read_length)
-                        except Exception as e:
-                            pass  # print(f"Error on {genome_id}: {e}")
-                        for read in reads:
-                            x[i] = read
-                            y[i] = index
-                            i += 1
-                            j += 1
-                            progress_bar.update(1)
-                        if j > n_to_sample:
-                            break
-                        if i >= n_reads:
-                            return x, y
-                    if j > n_to_sample:
-                        break
-    return x, y
+    x_new = np.concatenate(x_list, axis=0)
+    y_new = np.concatenate(y_list, axis=0)
+    return x_new, y_new
+
+
+def divide_dataset(x, y, counts: list[int]):
+    classes = np.unique(y)
+    datasets = [[[], []] for _ in counts]
+    total_per_class = sum(counts)
+
+    for c in classes:
+        idx = np.where(y == c)[0]
+        chosen = np.random.choice(
+            idx, size=total_per_class, replace=False
+        )
+        offset = 0
+        for i, n in enumerate(counts):
+            identifiers = chosen[offset:offset + n]
+            datasets[i][0].append(x[identifiers])
+            datasets[i][1].append(y[identifiers])
+
+    for i, _ in enumerate(counts):
+        datasets[i][0] = np.concatenate(datasets[i][0], axis=0)
+        datasets[i][1] = np.concatenate(datasets[i][1], axis=0)
+    return datasets
+
+
+def to_tetramers(x) -> np.ndarray:
+    new_x = np.zeros((len(x), len(x[0]) // 4), dtype=np.uint8)
+    for i, row in tqdm(enumerate(x)):
+        sequence = "".join([ONEHOT_TO_NUCLEOTIDE[r] for r in row])
+        new_x[i] = format.encode_tetramer(sequence)
+    return new_x
 
 
 def evaluate_n_nucleotides(

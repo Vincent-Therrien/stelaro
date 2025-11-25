@@ -426,8 +426,11 @@ class Taxonomy():
                 genomes in a bin. Smaller bins are pruned.
             n_max_reference_genomes_per_species: Maximum number of reference
                 genomes in a single species to bin at most.
-            max_bin_size: Maximum number of reference genomes in a bin.
-            n_max_bins: Maximum number of bins.
+            max_bin_size: Maximum number of reference genomes in a bin, e.g.
+                remove reference genomes inside of a genus if there are too
+                many.
+            n_max_bins: Maximum number of bins, e.g. remove genera if there are
+                too many.
 
         Returns: A dictionary that maps taxonomic levels to bins of reference
             genomes.

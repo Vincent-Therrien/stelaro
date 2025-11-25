@@ -16,6 +16,7 @@ from torch import argmax, tensor, no_grad, float32, Tensor, zeros, cat
 from torch.nn import functional
 from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils import clip_grad_norm_
+from torch import no_grad
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from time import time
@@ -526,14 +527,20 @@ def evaluate(classifier, loader, device, mapping, time_limit: float = None):
     mappings = obtain_rank_based_mappings(mapping)
     predicted_y = []
     real_y = []
-    from torch import no_grad
+    a = time()
+    n = 0
     with no_grad():
         for x_batch, y_batch in loader:
+            n += len(y_batch)
             x_batch = x_batch.long().to(device)
             y_batch = y_batch.to("cpu")
             predictions = classifier.predict(x_batch)
             predicted_y += predictions
             real_y += y_batch
+            if time_limit and time() - a > time_limit:
+                print(f"Halting evaluation after {n} data points.")
+                break
+
     ranks =  rank_based_f1_score(mappings, real_y, predicted_y)
     collapsed = []
     for rank in ranks[::-1]:
@@ -541,7 +548,7 @@ def evaluate(classifier, loader, device, mapping, time_limit: float = None):
     return collapsed
 
 
-def benchmark_classifier(classifier, loader, device, mapping, time_limit: float = 10_000):
+def benchmark_classifier(classifier, loader, device, mapping, time_limit: float = None):
     mappings = obtain_rank_based_mappings(mapping)
     predicted_y = []
     real_y = []
@@ -555,7 +562,7 @@ def benchmark_classifier(classifier, loader, device, mapping, time_limit: float 
             predictions = classifier.predict(x_batch)
             predicted_y += predictions
             real_y += y_batch
-            if time() - a > time_limit:
+            if time_limit and time() - a > time_limit:
                 print(f"Halting evaluation after {n} data points.")
                 break
 
@@ -926,14 +933,18 @@ class Classifier(BaseClassifier):
         validation_loss = 0
         i = 0
         a = time()
-        for x_batch, y_batch in validation_data:
-            loss = self._compute_loss(
-                x_batch, y_batch, loss_function_type, loss_function
-            )
-            validation_loss += loss.item()
-            i += 1
-            if time() - a > time_limit:
-                break
+        n = 0
+        with no_grad():
+            for x_batch, y_batch in validation_data:
+                n += len(y_batch)
+                loss = self._compute_loss(
+                    x_batch, y_batch, loss_function_type, loss_function
+                )
+                validation_loss += loss.item()
+                i += 1
+                if time() - a > time_limit:
+                    print(f"Halting evaluation after {n} data points.")
+                    break
         validation_loss /= i
         validation_loss *= self.length
         return validation_loss
@@ -991,7 +1002,10 @@ class Classifier(BaseClassifier):
                 optimizer.step()
                 # Infrequent evaluations; check real performance.
                 msg = ""
-                if n_steps and n_steps % evaluation_interval == 0:
+                if n_steps and (
+                        n_steps % evaluation_interval == 0
+                        or n_steps >= n_max_steps
+                    ):
                     f1 = evaluate(
                         self,
                         validate_loader,

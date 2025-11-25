@@ -95,7 +95,7 @@ class GlobalMemory(nn.Module):
         return new_memory
 
 
-class GlobalMambaSequenceClassifier(nn.Module):
+class MambaMemorySequenceClassifier(nn.Module):
     def __init__(
         self,
         N: int,

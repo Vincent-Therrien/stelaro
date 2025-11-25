@@ -23,7 +23,7 @@ def encode_tetramer(sequence: str) -> list[int]:
     """Convert a nucleotide sequence into tetramer encoding.
 
     Args:
-        sequence: Nucleotide sequence.
+        sequence: Nucleotide sequence, in string (ACGT).
 
     Returns: 4-mer encoded sequence.
     """
@@ -56,7 +56,7 @@ def decode_tetramer(sequence: list[int]) -> str:
     }
 
     def decode_integer(integer):
-        if sequence > 255:
+        if integer > 255:
             raise RuntimeError(f"Invalid tetramer: {integer}")
         tetramer = ''
         for shift in (6, 4, 2, 0):
