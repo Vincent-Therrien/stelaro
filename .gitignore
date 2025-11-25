@@ -47,6 +47,7 @@ documentation/_templates/
 
 # Sample data
 data/*
+*.tsv
 
 # Trained models
 *.pt2
