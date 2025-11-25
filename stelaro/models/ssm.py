@@ -252,3 +252,47 @@ class MambaSequenceClassifierMemoryCNN(nn.Module):
         pooled = self.dropout(pooled)
         logits = self.classifier(pooled)
         return logits
+
+
+class MambaSequenceClassifierResidual(nn.Module):
+    """A sequence classifier network that supports MLM."""
+    def __init__(
+        self,
+        N: int,
+        num_classes: int,
+        vocab_size: int,
+        d_model: int,
+        n_layers: int,
+        d_state: int,
+        d_conv: int = 4,
+        expand: int = 2,
+        pooling = "mean",
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+        self.embedding = nn.Embedding(vocab_size + 1, d_model)
+        self.layers = nn.ModuleList([
+            MambaBlock(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
+            for _ in range(n_layers)
+        ])
+        self.norm = nn.LayerNorm(d_model)
+        self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+        self.classifier = nn.Linear(d_model, num_classes)
+        self.pooling = pooling
+        self.mlm_head = nn.Linear(d_model, vocab_size + 1)
+
+    def forward(self, x: torch.LongTensor, mlm=None) -> torch.Tensor:
+        h = self.embedding(x)
+        residual = h.clone()
+        for block in self.layers:
+            h = block(h)   # each Mamba block returns [B, L, d_model]
+            h = h + residual
+        h = self.norm(h)
+        if mlm is not None:
+            logits = self.mlm_head(h)  # [B, L, vocab_size + 1]
+            return logits
+        else:
+            pooled = h.mean(dim=1)  # [B, d_model]
+            pooled = self.dropout(pooled)
+            logits = self.classifier(pooled)  # [B, num_classes]
+            return logits
