@@ -118,22 +118,6 @@ def decode_onehot(onehot: list[int]) -> str:
     return "".join(["ACGT"[digit] for digit in digits])
 
 
-def tetramer_batch_to_codons(batch: Tensor) -> Tensor:
-    """Convert a batch of tetramer-encoded reads into a 3-mer batch.
-
-    Args:
-        batch: Tensor of shape (batch_size, sequence_length)
-
-    Returns: 3-mer-encoded batch.
-    """
-    digits = tetramer_batch_to_digits(batch)
-    B, N = digits.shape
-    codons = digits.view(B, N // 3, 3)
-    powers = tensor([16, 4, 1], device=batch.device, dtype=batch.dtype)
-    codons_encoded = (codons * powers).sum(dim=-1)
-    return codons_encoded
-
-
 def decode_codons(codons: list[int]) -> str:
     """Convert a codon encoding into a nucleotide sequence.
 
@@ -183,7 +167,12 @@ def to_codons(batch: Tensor) -> Tensor:
 
     Returns: Codon batch.
     """
-    return tetramer_batch_to_codons(batch)
+    digits = tetramer_batch_to_digits(batch)
+    B, N = digits.shape
+    codons = digits.view(B, N // 3, 3)
+    powers = tensor([16, 4, 1], device=batch.device, dtype=batch.dtype)
+    codons_encoded = (codons * powers).sum(dim=-1)
+    return codons_encoded
 
 
 def to_digits(batch: Tensor) -> Tensor:
@@ -197,3 +186,19 @@ def to_digits(batch: Tensor) -> Tensor:
     Returns: Digit batch.
     """
     return tetramer_batch_to_digits(batch)
+
+
+def to_pairs(batch: Tensor) -> Tensor:
+    """Transform a tetramer encoding into a 2-mer encoding.
+
+    Args:
+        batch: A batch of tetramer-encoded sequences.
+
+    Returns: 2-mer batch.
+    """
+    digits = tetramer_batch_to_digits(batch)
+    B, N = digits.shape
+    codons = digits.view(B, N // 2, 2)
+    powers = tensor([4, 1], device=batch.device, dtype=batch.dtype)
+    codons_encoded = (codons * powers).sum(dim=-1)
+    return codons_encoded

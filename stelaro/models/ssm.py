@@ -277,22 +277,29 @@ class MambaSequenceClassifierResidual(nn.Module):
         ])
         self.norm = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-        self.classifier = nn.Linear(d_model, num_classes)
+        self.classifier = nn.Linear(d_model + 1, num_classes)
         self.pooling = pooling
         self.mlm_head = nn.Linear(d_model, vocab_size + 1)
+        self.combiner = MambaBlock(d_model=d_model + 1, d_state=d_state, d_conv=d_conv, expand=expand)
+        self.final_norm = nn.LayerNorm(d_model + 1)
 
     def forward(self, x: torch.LongTensor, mlm=None) -> torch.Tensor:
         h = self.embedding(x)
-        residual = h.clone()
+        residual = x.unsqueeze(-1)   # [B, L, 1]
         for block in self.layers:
             h = block(h)   # each Mamba block returns [B, L, d_model]
-            h = h + residual
         h = self.norm(h)
+
+        # Residual
+        h = torch.cat([h, residual], dim=-1)  # [B, L, d_model + 1]
+        h = self.combiner(h)
+        h = self.final_norm(h)
+
         if mlm is not None:
             logits = self.mlm_head(h)  # [B, L, vocab_size + 1]
             return logits
         else:
-            pooled = h.mean(dim=1)  # [B, d_model]
+            pooled = h.mean(dim=1)  # [B, d_model + 1]
             pooled = self.dropout(pooled)
             logits = self.classifier(pooled)  # [B, num_classes]
             return logits

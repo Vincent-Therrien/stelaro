@@ -27,7 +27,7 @@ def test_data_format():
     reconstructed_sequence = format.decode_onehot(onehot)
     assert reconstructed_sequence == sequence
     # Codon encoding.
-    codons = format.tetramer_batch_to_codons(batch)[0]
+    codons = format.to_codons(batch)[0]
     assert len(codons) == len(sequence) / 3
     reconstructed_sequence = format.decode_codons(codons)
     assert reconstructed_sequence == sequence
