@@ -1031,10 +1031,7 @@ class Classifier(BaseClassifier):
                     msg += f"Precision: {p_msg} "
                     self.model.train()
                 # Frequent evaluations; report losses.
-                if n_steps and (
-                        n_steps % patience_interval == 0
-                        or n_steps >= n_max_steps
-                    ):
+                if n_steps and n_steps % patience_interval == 0:
                     training_losses.append(current_loss * self.length / patience_interval)
                     current_loss = 0
                     validation_losses.append(
