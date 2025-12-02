@@ -1002,10 +1002,7 @@ class Classifier(BaseClassifier):
                 optimizer.step()
                 # Infrequent evaluations; check real performance.
                 msg = ""
-                if n_steps and (
-                        n_steps % evaluation_interval == 0
-                        or n_steps >= n_max_steps
-                    ):
+                if n_steps and n_steps % evaluation_interval == 0:
                     f1 = evaluate(
                         self,
                         validate_loader,
@@ -1063,6 +1060,8 @@ class Classifier(BaseClassifier):
                 if msg:
                     print(msg)
                 n_steps += 1
+                if n_steps >= n_max_steps:
+                    return training_losses, validation_losses
         print(
             f"Training loss: {training_losses[-1]:.5f}. "
             f"Validation loss: {validation_losses[-1]:.5f}. "
