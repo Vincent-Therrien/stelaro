@@ -10,7 +10,7 @@
 from random import randint, shuffle
 from typing import Callable
 import numpy as np
-from sklearn.metrics import f1_score, precision_score
+from sklearn.metrics import f1_score, precision_score, recall_score
 import torch
 from torch import argmax, tensor, no_grad, float32, Tensor, zeros, cat
 from torch.nn import functional
@@ -548,6 +548,34 @@ def evaluate(classifier, loader, device, mapping, time_limit: float = None):
     return collapsed
 
 
+def p_r_f1(classifier, loader, device) -> tuple[float]:
+    predicted_y = []
+    real_y = []
+    with no_grad():
+        for x_batch, y_batch in tqdm(loader):
+            x_batch = x_batch.long().to(device)
+            y_batch = y_batch.to("cpu")
+            predictions = classifier.predict(x_batch).to("cpu")
+            predicted_y += predictions
+            real_y += y_batch
+    precision = precision_score(
+        real_y,
+        predicted_y,
+        average="macro"
+    )
+    recall = recall_score(
+        real_y,
+        predicted_y,
+        average="macro"
+    )
+    f1 = f1_score(
+        real_y,
+        predicted_y,
+        average="macro",
+    )
+    return precision, recall, f1
+
+
 def benchmark_classifier(classifier, loader, device, mapping, time_limit: float = None):
     mappings = obtain_rank_based_mappings(mapping)
     predicted_y = []
@@ -583,6 +611,7 @@ def benchmark_classifier(classifier, loader, device, mapping, time_limit: float 
         matrix[y][p] += 1
     plt.matshow(matrix)
     plt.show()
+
 
 def rank_based_precision(
         mappings: dict,
