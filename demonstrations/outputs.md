@@ -4288,3 +4288,99 @@ Validation losses: [678.0513374882187, 626.2339177558166, 625.0563267239197]
 F1 scores: [array([0.96746092, 0.96856266, 0.96242198]), array([0.90034244, 0.90078687, 0.90297634]), array([0.89021277, 0.89056701, 0.89204064]), array([0.83733752, 0.84502936, 0.84937694])]
 Precisions: [array([0.9657432 , 0.96247502, 0.9595713 ]), array([0.89489523, 0.89137663, 0.91052408]), array([0.88853184, 0.88593611, 0.89919278]), array([0.83843483, 0.84958071, 0.85724422])]
 
+#### 2.3.2.6. Transformer-CNN
+
+Number of parameters: 1_159_840
+Epoch 1
+ 28%|██▊       | 4000/14161 [43:49<1:51:02,  1.53it/s]
+Halting evaluation after 11776 data points.
+Halting evaluation after 12416 data points.
+ 28%|██▊       | 4001/14161 [45:23<81:38:34, 28.93s/it]
+Halting evaluation after 10112 data points.
+1/1 F1: [0.87597, 0.60576, 0.60331, 0.52064]. Precision: [0.86475, 0.65589, 0.62649, 0.57119]
+Training loss: 3536.19038. Validation loss: 2201.15167. Patience: 200
+ 56%|█████▋    | 8000/14161 [1:29:17<1:07:41,  1.52it/s]
+Halting evaluation after 12224 data points.
+Halting evaluation after 12352 data points.
+ 57%|█████▋    | 8001/14161 [1:30:53<50:01:46, 29.24s/it]
+Halting evaluation after 10048 data points.
+1/1 F1: [0.9356, 0.81886, 0.80511, 0.74165]. Precision: [0.93043, 0.80619, 0.81086, 0.76564]
+Training loss: 1642.97162. Validation loss: 1323.94328. Patience: 200
+ 85%|████████▍ | 12000/14161 [2:14:47<23:43,  1.52it/s]
+Halting evaluation after 11968 data points.
+Halting evaluation after 12416 data points.
+ 85%|████████▍ | 12001/14161 [2:16:22<17:18:51, 28.86s/it]
+Halting evaluation after 10176 data points.
+1/1 F1: [0.95634, 0.85617, 0.851, 0.79423]. Precision: [0.94462, 0.86449, 0.86426, 0.81462]
+Training loss: 1140.77618. Validation loss: 1055.29413. Patience: 200
+100%|██████████| 14161/14161 [2:40:07<00:00,  1.47it/s]
+Training loss: 1140.77618. Validation loss: 1055.29413. Patience: 200
+Maximum number of epochs reached; stopping early.
+Training losses: [3536.190384440124, 1642.971622813493, 1140.7761782594025]
+Validation losses: [2201.151668648177, 1323.9432814394593, 1055.2941325981662]
+F1 scores: [array([0.87597397, 0.93560409, 0.95634102]), array([0.60576419, 0.81885786, 0.85617125]), array([0.60331132, 0.80510616, 0.85100096]), array([0.52063902, 0.74165366, 0.79422953])]
+Precisions: [array([0.86474841, 0.93043043, 0.9446184 ]), array([0.65589067, 0.80619002, 0.86448861]), array([0.6264873 , 0.81085923, 0.86425774]), array([0.57119003, 0.76564088, 0.81461674])]
+
+Epoch 2
+ 28%|██▊       | 4000/14161 [43:52<1:51:12,  1.52it/s]
+Halting evaluation after 12160 data points.
+Halting evaluation after 12416 data points.
+ 28%|██▊       | 4001/14161 [45:26<81:32:37, 28.89s/it]
+Halting evaluation after 10176 data points.
+1/1 F1: [0.96877, 0.90553, 0.89286, 0.84553]. Precision: [0.97485, 0.91911, 0.90353, 0.86068]
+Training loss: 854.34173. Validation loss: 813.54592. Patience: 200
+ 56%|█████▋    | 8000/14161 [1:29:16<1:07:45,  1.52it/s]
+Halting evaluation after 12224 data points.
+Halting evaluation after 12416 data points.
+ 57%|█████▋    | 8001/14161 [1:30:51<49:19:21, 28.82s/it]
+Halting evaluation after 10112 data points.
+1/1 F1: [0.97394, 0.91092, 0.894, 0.85215]. Precision: [0.9753, 0.90333, 0.90059, 0.86986]
+Training loss: 753.33178. Validation loss: 712.75569. Patience: 200
+ 85%|████████▍ | 12000/14161 [2:16:00<24:27,  1.47it/s]
+Halting evaluation after 11520 data points.
+Halting evaluation after 11840 data points.
+ 85%|████████▍ | 12001/14161 [2:17:35<17:23:22, 28.98s/it]
+Halting evaluation after 9664 data points.
+1/1 F1: [0.98155, 0.92967, 0.91928, 0.87185]. Precision: [0.98651, 0.94251, 0.92755, 0.88506]
+Training loss: 682.16810. Validation loss: 612.01080. Patience: 200
+100%|██████████| 14161/14161 [2:41:46<00:00,  1.46it/s]
+Training loss: 682.16810. Validation loss: 612.01080. Patience: 200
+Maximum number of epochs reached; stopping early.
+Training losses: [854.3417287059128, 753.3317849505693, 682.1681019989774]
+Validation losses: [813.5459241720866, 712.755685436386, 612.0107954503685]
+F1 scores: [array([0.9687732 , 0.97394274, 0.98154955]), array([0.90553226, 0.91092303, 0.92967191]), array([0.89286113, 0.89399928, 0.91927524]), array([0.84552512, 0.85215315, 0.87185223])]
+Precisions: [array([0.97485101, 0.9753037 , 0.98650817]), array([0.91911201, 0.90333221, 0.94250771]), array([0.90352503, 0.90058942, 0.92755411]), array([0.86068099, 0.86986398, 0.88506131])]
+
+Epoch 3
+ 28%|██▊       | 4000/14161 [44:40<1:51:45,  1.52it/s]
+Halting evaluation after 12224 data points.
+Halting evaluation after 12352 data points.
+ 28%|██▊       | 4001/14161 [46:15<81:31:19, 28.89s/it]
+Halting evaluation after 10112 data points.
+1/1 F1: [0.97652, 0.93151, 0.92366, 0.88757]. Precision: [0.96709, 0.92928, 0.92087, 0.89072]
+Training loss: 599.73985. Validation loss: 610.02002. Patience: 200
+ 56%|█████▋    | 8000/14161 [1:30:09<1:07:38,  1.52it/s]
+Halting evaluation after 12224 data points.
+Halting evaluation after 11968 data points.
+ 57%|█████▋    | 8001/14161 [1:31:44<49:40:36, 29.03s/it]
+Halting evaluation after 10112 data points.
+1/1 F1: [0.97079, 0.92625, 0.92178, 0.87617]. Precision: [0.96604, 0.93315, 0.92151, 0.88648]
+Training loss: 577.59106. Validation loss: 587.18186. Patience: 200
+ 85%|████████▍ | 12000/14161 [2:15:52<23:59,  1.50it/s]
+Halting evaluation after 12032 data points.
+Halting evaluation after 12160 data points.
+ 85%|████████▍ | 12001/14161 [2:17:27<17:30:03, 29.17s/it]
+Halting evaluation after 9984 data points.
+1/1 F1: [0.98388, 0.94409, 0.93807, 0.89805]. Precision: [0.98788, 0.93951, 0.93897, 0.90618]
+Training loss: 552.30376. Validation loss: 521.02272. Patience: 200
+100%|██████████| 14161/14161 [2:41:10<00:00,  1.46it/s]
+Training loss: 552.30376. Validation loss: 521.02272. Patience: 200
+Maximum number of epochs reached; stopping early.
+Training losses: [599.7398461215198, 577.59105628822, 552.3037611274049]
+Validation losses: [610.0200206229958, 587.1818597793956, 521.0227193310857]
+F1 scores: [array([0.97651548, 0.97078938, 0.9838815 ]), array([0.93150942, 0.92624556, 0.94408585]), array([0.92366122, 0.92177706, 0.93806706]), array([0.88756819, 0.87616847, 0.898053  ])]
+Precisions: [array([0.9670852 , 0.96603969, 0.98787538]), array([0.92927723, 0.93315451, 0.93950551]), array([0.92087291, 0.9215113 , 0.93896641]), array([0.89072277, 0.88648443, 0.90618087])]
+Training losses: [854.3417287059128, 753.3317849505693, 682.1681019989774, 599.7398461215198, 577.59105628822, 552.3037611274049]
+Validation losses: [813.5459241720866, 712.755685436386, 612.0107954503685, 610.0200206229958, 587.1818597793956, 521.0227193310857]
+F1 scores: [array([0.9687732 , 0.97394274, 0.98154955]), array([0.90553226, 0.91092303, 0.92967191]), array([0.89286113, 0.89399928, 0.91927524]), array([0.84552512, 0.85215315, 0.87185223]), array([0.97651548, 0.97078938, 0.9838815 ]), array([0.93150942, 0.92624556, 0.94408585]), array([0.92366122, 0.92177706, 0.93806706]), array([0.88756819, 0.87616847, 0.898053  ])]
+Precisions: [array([0.97485101, 0.9753037 , 0.98650817]), array([0.91911201, 0.90333221, 0.94250771]), array([0.90352503, 0.90058942, 0.92755411]), array([0.86068099, 0.86986398, 0.88506131]), array([0.9670852 , 0.96603969, 0.98787538]), array([0.92927723, 0.93315451, 0.93950551]), array([0.92087291, 0.9215113 , 0.93896641]), array([0.89072277, 0.88648443, 0.90618087])]
