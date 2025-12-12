@@ -10,6 +10,10 @@
 import torch
 from mamba_ssm import Mamba
 from torch import nn
+from torch.nn import (Module, Embedding, Linear, Parameter,
+                      TransformerEncoderLayer, TransformerEncoder,
+                      Sequential, Conv1d, ReLU, BatchNorm1d)
+from torch import arange, cat, randn
 
 
 class MambaBlock(nn.Module):
@@ -270,36 +274,36 @@ class MambaSequenceClassifierResidual(nn.Module):
         dropout: float = 0.1,
     ):
         super().__init__()
-        self.embedding = nn.Embedding(vocab_size + 1, d_model)
-        self.layers = nn.ModuleList([
-            MambaBlock(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
-            for _ in range(n_layers)
-        ])
-        self.norm = nn.LayerNorm(d_model)
-        self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-        self.classifier = nn.Linear(d_model + 1, num_classes)
-        self.pooling = pooling
-        self.mlm_head = nn.Linear(d_model, vocab_size + 1)
-        self.combiner = MambaBlock(d_model=d_model + 1, d_state=d_state, d_conv=d_conv, expand=expand)
-        self.final_norm = nn.LayerNorm(d_model + 1)
+        self.tokenizer = DownsamplingCNNTokenizer()
+        self.A = MambaBlock(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
+        self.B = MambaBlock(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
+        self.D = MambaBlock(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
+        self.E = MambaBlock(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
+        encoder_layer = TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=4,
+            dim_feedforward=d_model * 4,
+            dropout=dropout,
+            activation='relu',
+            batch_first=True  # makes input/output shape [B, L, D]
+        )
+        self.F = TransformerEncoder(encoder_layer, num_layers=1)
+        self.F_token = Parameter(randn(1, 1, d_model))
+        self.F_position_embedding = Embedding(376, d_model)
+        self.classifier = nn.Linear(d_model, num_classes)
 
     def forward(self, x: torch.LongTensor, mlm=None) -> torch.Tensor:
-        h = self.embedding(x)
-        residual = x.unsqueeze(-1)   # [B, L, 1]
-        for block in self.layers:
-            h = block(h)   # each Mamba block returns [B, L, d_model]
-        h = self.norm(h)
-
-        # Residual
-        h = torch.cat([h, residual], dim=-1)  # [B, L, d_model + 1]
-        h = self.combiner(h)
-        h = self.final_norm(h)
-
-        if mlm is not None:
-            logits = self.mlm_head(h)  # [B, L, vocab_size + 1]
-            return logits
-        else:
-            pooled = h.mean(dim=1)  # [B, d_model + 1]
-            pooled = self.dropout(pooled)
-            logits = self.classifier(pooled)  # [B, num_classes]
-            return logits
+        B = x.size(0)
+        h = self.tokenizer(x)
+        h = self.A(h)
+        h = self.B(h)
+        h = self.D(h)
+        h = self.E(h)
+        cls = self.F_token.repeat(B, 1, 1)
+        h = cat([cls, h], dim=1)
+        positions = arange(0, 376, device=x.device).unsqueeze(0).expand(B, -1)
+        h = h + self.F_position_embedding(positions)
+        h = self.F(h)
+        h = h[:, 0, :]
+        logits = self.classifier(h)
+        return logits

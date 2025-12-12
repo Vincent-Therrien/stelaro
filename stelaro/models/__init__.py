@@ -576,7 +576,14 @@ def p_r_f1(classifier, loader, device) -> tuple[float]:
     return precision, recall, f1
 
 
-def benchmark_classifier(classifier, loader, device, mapping, time_limit: float = None):
+def benchmark_classifier(
+        classifier,
+        loader,
+        device,
+        mapping,
+        time_limit: float = None,
+        exclude_other: bool = False,
+    ):
     mappings = obtain_rank_based_mappings(mapping)
     predicted_y = []
     real_y = []
@@ -602,10 +609,14 @@ def benchmark_classifier(classifier, loader, device, mapping, time_limit: float 
 
     f1 = collapse(rank_based_f1_score(mappings, real_y, predicted_y))
     print(f"F1 score: {f1}")
-    macro = collapse(rank_based_precision(mappings, real_y, predicted_y, "macro"))
+    macro = collapse(
+        rank_based_precision(mappings, real_y, predicted_y, "macro", exclude_other)
+    )
     print(f"Macro precision score: {macro}")
-    weighted = collapse(rank_based_precision(mappings, real_y, predicted_y, "weighted"))
-    print(f"Weighted precision score: {weighted}")
+    # weighted = collapse(
+    #     rank_based_precision(mappings, real_y, predicted_y, "weighted", exclude_other)
+    # )
+    # print(f"Weighted precision score: {weighted}")
     matrix = np.zeros((len(mapping), len(mapping)))
     for y, p in zip(real_y, predicted_y):
         matrix[y][p] += 1
@@ -617,7 +628,8 @@ def rank_based_precision(
         mappings: dict,
         target: list[int],
         predictions: list[int],
-        average: str="macro"
+        average: str="macro",
+        exclude_other: bool = False
         ) -> list[np.ndarray]:
     """Evaluate precision at multiple taxonomic ranks."""
     p = []
@@ -625,6 +637,8 @@ def rank_based_precision(
         labels = list(set(mapping.values()))
         normalized_target = [mapping[int(v)] for v in list(target)]
         normalized_pred = [mapping[int(v)] for v in list(predictions)]
+        if exclude_other:
+            labels = labels[:-1]
         p.append(
             precision_score(
                 normalized_target,
