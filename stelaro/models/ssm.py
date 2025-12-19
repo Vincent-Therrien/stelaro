@@ -271,7 +271,7 @@ class MambaSequenceClassifierResidual(nn.Module):
         d_conv: int = 4,
         expand: int = 2,
         pooling = "mean",
-        dropout: float = 0.1,
+        dropout: float = 0.05,
     ):
         super().__init__()
         self.tokenizer = DownsamplingCNNTokenizer()
@@ -289,21 +289,21 @@ class MambaSequenceClassifierResidual(nn.Module):
         )
         self.F = TransformerEncoder(encoder_layer, num_layers=1)
         self.F_token = Parameter(randn(1, 1, d_model))
-        self.F_position_embedding = Embedding(376, d_model)
+        self.F_position_embedding = Embedding(375, d_model)
+        self.dropout = nn.Dropout(dropout)
         self.classifier = nn.Linear(d_model, num_classes)
 
     def forward(self, x: torch.LongTensor, mlm=None) -> torch.Tensor:
         B = x.size(0)
         h = self.tokenizer(x)
+        positions = arange(0, 375, device=x.device).unsqueeze(0).expand(B, -1)
+        h = h + self.F_position_embedding(positions)
+        h = self.F(h)
         h = self.A(h)
         h = self.B(h)
         h = self.D(h)
         h = self.E(h)
-        cls = self.F_token.repeat(B, 1, 1)
-        h = cat([cls, h], dim=1)
-        positions = arange(0, 376, device=x.device).unsqueeze(0).expand(B, -1)
-        h = h + self.F_position_embedding(positions)
-        h = self.F(h)
-        h = h[:, 0, :]
-        logits = self.classifier(h)
+        pooled = h.mean(dim=1)
+        pooled = self.dropout(pooled)
+        logits = self.classifier(pooled)
         return logits
