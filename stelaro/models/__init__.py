@@ -608,11 +608,17 @@ def benchmark_classifier(
         return collapsed
 
     f1 = collapse(rank_based_f1_score(mappings, real_y, predicted_y))
-    print(f"F1 score: {f1}")
+    representation = [f"{v:.4}" for v in f1]
+    string = str(representation)
+    string = string.replace("'", "")
+    print(f"F1 score: {string}")
     macro = collapse(
         rank_based_precision(mappings, real_y, predicted_y, "macro", exclude_other)
     )
-    print(f"Macro precision score: {macro}")
+    representation = [f"{v:.4}" for v in macro]
+    string = str(representation)
+    string = string.replace("'", "")
+    print(f"Macro precision score: {string}")
     # weighted = collapse(
     #     rank_based_precision(mappings, real_y, predicted_y, "weighted", exclude_other)
     # )

@@ -57,13 +57,13 @@ def sample_read(
     if fasta_identifier:
         fasta_lines = []
     for current_read_id in range(n_reads):
-        for _ in range(5):
+        for _ in range(20):
             selection = choices(indices, weights=sequence_lengths, k=1)[0]
             sequence = genome[selection][1]
             cursor = randint(0, len(sequence) - length)
             sequence = sequence[cursor:cursor + length]
-            fraction = sequence.count('N') / length
-            if fraction <= MAXIMUM_UNDEFINED_FRACTION:
+            allowed = set("ACGT")
+            if set(sequence) <= allowed:
                 encoding = [NUCLEOTIDE_TO_ONEHOT[s] for s in sequence]
                 samples.append(encoding)
                 if fasta_identifier:
@@ -187,9 +187,15 @@ def divide_dataset(x, y, counts: list[int]):
 
     for c in classes:
         idx = np.where(y == c)[0]
-        chosen = np.random.choice(
-            idx, size=total_per_class, replace=False
-        )
+        try:
+            chosen = np.random.choice(
+                idx, size=total_per_class, replace=False
+            )
+        except:
+            print(f"Less samples than expected for class {c}, using {len(idx)}.")
+            chosen = np.random.choice(
+                idx, size=len(idx), replace=False
+            )
         offset = 0
         for i, n in enumerate(counts):
             identifiers = chosen[offset:offset + n]
@@ -639,7 +645,7 @@ class AdaptiveCompressedReadDataset(Dataset):
         for frequency, i in zip(frequencies, self.identifiers_by_class):
             weight = len(self.identifiers_by_class) / self.n
             amount = int(frequency * self.partition_size) + 0.5 * weight
-            identifier_list += choices(self.identifiers_by_class[i], k=n)
+            identifier_list += choices(self.identifiers_by_class[i], k=amount)
         shuffle(identifier_list)
         if len(identifier_list) < self.partition_size:
             delta = self.partition_size - len(identifier_list)
