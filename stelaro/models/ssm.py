@@ -195,7 +195,7 @@ class MambaSequenceClassifierCNN(nn.Module):
         dropout: float = 0.1,
     ):
         super().__init__()
-        self.tokenizer = DownsamplingCNNTokenizer()
+        self.tokenizer = DownsamplingCNNTokenizer(d_model=d_model)
         self.layers = nn.ModuleList([
             MambaBlock(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
             for _ in range(n_layers)
