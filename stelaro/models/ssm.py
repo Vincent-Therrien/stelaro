@@ -124,6 +124,7 @@ class MambaMemorySequenceClassifier(nn.Module):
         self.memory_blocks = nn.ModuleList([
             GlobalMemory(d_model) for _ in range(n_layers)
         ])
+        # self.memory_block = GlobalMemory(d_model)
         self.memory_init = nn.Parameter(torch.zeros(1, d_model))
         self.mlm_head = nn.Linear(d_model, vocab_size + 1)
 
@@ -307,4 +308,171 @@ class MambaSequenceClassifierResidual(nn.Module):
         pooled = h.mean(dim=1)
         pooled = self.dropout(pooled)
         logits = self.classifier(pooled)
+        return logits
+
+
+class AdjustableMambaBlock(nn.Module):
+    def __init__(self, d_model, d_state, d_conv, expand, m, M):
+        super().__init__()
+        self.norm = nn.LayerNorm(d_model)
+        self.mamba = Mamba(
+            d_model=d_model,
+            d_state=d_state,
+            d_conv=d_conv,
+            expand=expand,
+            dt_min = m,
+            dt_max=M,
+        )
+
+    def forward(self, x):
+        return x + self.mamba(self.norm(x))
+
+
+class DualTimescaleMamba(nn.Module):
+    def __init__(self, d_model, d_state, fast_dt=(0.00001, 0.01), slow_dt=(0.001, 0.2)):
+        super().__init__()
+        self.in_proj = nn.Linear(d_model, d_model * 2)
+        self.ssm_fast = AdjustableMambaBlock(
+            d_model=d_model,
+            d_state=d_state,
+            d_conv=4,
+            expand=2,
+            m=fast_dt[0],
+            M=fast_dt[1],
+        )
+        self.ssm_slow = AdjustableMambaBlock(
+            d_model=d_model,
+            d_state=d_state,
+            d_conv=4,
+            expand=2,
+            m=slow_dt[0],
+            M=slow_dt[1],
+        )
+        self.gate = nn.Linear(d_model, d_model)
+        self.out_proj = nn.Linear(d_model, d_model)
+
+    def forward(self, x):
+        u, v = self.in_proj(x).chunk(2, dim=-1)
+        y_fast = self.ssm_fast(u)
+        y_slow = self.ssm_slow(u)
+        g = torch.sigmoid(self.gate(v))
+        y = g * y_fast + (1 - g) * y_slow
+        return self.out_proj(y)
+
+
+class MambaSequenceClassifierDual(nn.Module):
+    """A sequence classifier network that supports MLM."""
+    def __init__(
+        self,
+        N: int,
+        num_classes: int,
+        vocab_size: int,
+        d_model: int,
+        n_layers: int,
+        d_state: int,
+        d_conv: int = 4,
+        expand: int = 2,
+        dropout: float = 0.1,
+        fast_dt=(0.00001, 0.01),
+        slow_dt=(0.001, 0.2),
+    ):
+        super().__init__()
+        self.embedding = nn.Embedding(vocab_size + 1, d_model)
+        self.layers = nn.ModuleList([
+            DualTimescaleMamba(d_model=d_model, d_state=d_state, fast_dt=fast_dt, slow_dt=slow_dt)
+        ])
+        for _ in range(n_layers - 2):
+            self.layers.append(
+                MambaBlock(
+                    d_model=d_model,
+                    d_state=d_state,
+                    d_conv=d_conv,
+                    expand=expand,
+                )
+            )
+        self.norm = nn.LayerNorm(d_model)
+        self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+        self.classifier = nn.Linear(d_model, num_classes)
+
+    def forward(self, x: torch.LongTensor) -> torch.Tensor:
+        h = self.embedding(x)
+        for block in self.layers:
+            h = block(h)   # each Mamba block returns [B, L, d_model]
+        h = self.norm(h)
+        pooled = h.mean(dim=1)  # [B, d_model]
+        pooled = self.dropout(pooled)
+        logits = self.classifier(pooled)  # [B, num_classes]
+        return logits
+
+
+class DualTimescaleMambaSeparate(nn.Module):
+    def __init__(self, d_model, d_state, fast_dt=(0.00001, 0.01), slow_dt=(0.001, 0.2)):
+        super().__init__()
+        self.ssm_fast = AdjustableMambaBlock(
+            d_model=d_model,
+            d_state=d_state,
+            d_conv=4,
+            expand=2,
+            m=fast_dt[0],
+            M=fast_dt[1],
+        )
+        self.ssm_slow = AdjustableMambaBlock(
+            d_model=d_model,
+            d_state=d_state,
+            d_conv=4,
+            expand=2,
+            m=slow_dt[0],
+            M=slow_dt[1],
+        )
+        self.gate = nn.Linear(d_model, d_model)
+        self.out_proj = nn.Linear(d_model, d_model)
+
+    def forward(self, x, y):
+        hx = self.ssm_fast(x)
+        hy = self.ssm_slow(y)
+        g = torch.sigmoid(self.gate(hx))
+        h = g * hx + (1 - g) * hy
+        return self.out_proj(h)
+
+
+class MambaSequenceClassifierDualCNN(nn.Module):
+    """A sequence classifier network that supports MLM."""
+    def __init__(
+        self,
+        N: int,
+        num_classes: int,
+        d_model: int,
+        n_layers: int,
+        d_state: int,
+        d_conv: int = 4,
+        expand: int = 2,
+        dropout: float = 0.05,
+        fast_dt=(0.00001, 0.01),
+        slow_dt=(0.001, 0.2),
+    ):
+        super().__init__()
+        self.tokenizerFast = DownsamplingCNNTokenizer(d_model=d_model, downsample_factor=4)
+        self.tokenizerSlow = DownsamplingCNNTokenizer(d_model=d_model, downsample_factor=4)
+        self.dual = DualTimescaleMambaSeparate(d_model=d_model, d_state=d_state, fast_dt=fast_dt, slow_dt=slow_dt)
+        self.layers = nn.ModuleList([MambaBlock(
+                d_model=d_model,
+                d_state=d_state,
+                d_conv=d_conv,
+                expand=expand,
+            ) for _ in range(n_layers - 2)
+        ])
+        self.norm = nn.LayerNorm(d_model)
+        self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+        self.classifier = nn.Linear(d_model, num_classes)
+
+    def forward(self, x: torch.LongTensor) -> torch.Tensor:
+        hFast = self.tokenizerFast(x)
+        hSlow = self.tokenizerSlow(x)
+        h = self.dual(hFast, hSlow)
+        for block in self.layers:
+            h = block(h)   # each Mamba block returns [B, L, d_model]
+        h = self.norm(h)
+        pooled = h.mean(dim=1)  # [B, d_model]
+        pooled = self.dropout(pooled)
+        logits = self.classifier(pooled)  # [B, num_classes]
         return logits
