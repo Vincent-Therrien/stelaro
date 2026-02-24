@@ -583,6 +583,7 @@ def benchmark_classifier(
         mapping,
         time_limit: float = None,
         exclude_other: bool = False,
+        only_precision: bool = False,
     ):
     mappings = obtain_rank_based_mappings(mapping)
     predicted_y = []
@@ -607,27 +608,34 @@ def benchmark_classifier(
             collapsed.append(np.mean(rank))
         return collapsed
 
-    f1 = collapse(rank_based_f1_score(mappings, real_y, predicted_y))
-    representation = [f"{v:.4}" for v in f1]
-    string = str(representation)
-    string = string.replace("'", "")
-    print(f"F1 score: {string}")
-    macro = collapse(
-        rank_based_precision(mappings, real_y, predicted_y, "macro", exclude_other)
-    )
-    representation = [f"{v:.4}" for v in macro]
-    string = str(representation)
-    string = string.replace("'", "")
-    print(f"Macro precision score: {string}")
-    # weighted = collapse(
-    #     rank_based_precision(mappings, real_y, predicted_y, "weighted", exclude_other)
-    # )
-    # print(f"Weighted precision score: {weighted}")
-    matrix = np.zeros((len(mapping), len(mapping)))
-    for y, p in zip(real_y, predicted_y):
-        matrix[y][p] += 1
-    plt.matshow(matrix)
-    plt.show()
+    if only_precision:
+        macro = collapse(
+            rank_based_precision(mappings, real_y, predicted_y, "macro", exclude_other)
+        )
+        representation = [f"{v:.4}" for v in macro]
+        string = str(representation)
+        string = string.replace("'", "")
+        print(f"Macro precision score: {string}")
+    else:
+        f1 = collapse(rank_based_f1_score(mappings, real_y, predicted_y))
+        representation = [f"{v:.4}" for v in f1]
+        string = str(representation)
+        string = string.replace("'", "")
+        print(f"F1 score: {string}")
+
+        macro = collapse(
+            rank_based_precision(mappings, real_y, predicted_y, "macro", exclude_other)
+        )
+        representation = [f"{v:.4}" for v in macro]
+        string = str(representation)
+        string = string.replace("'", "")
+        print(f"Macro precision score: {string}")
+
+        matrix = np.zeros((len(mapping), len(mapping)))
+        for y, p in zip(real_y, predicted_y):
+            matrix[y][p] += 1
+        plt.matshow(matrix)
+        plt.show()
 
 
 def rank_based_precision(
@@ -1111,12 +1119,13 @@ class Classifier(BaseClassifier):
                 n_steps += 1
                 if n_steps >= n_max_steps:
                     return training_losses, validation_losses
-        print(
-            f"Training loss: {training_losses[-1]:.5f}. "
-            f"Validation loss: {validation_losses[-1]:.5f}. "
-            f"Patience: {patience}"
-        )
-        print("Maximum number of epochs reached; stopping early.")
-        f = list(np.array(average_f_scores).T)
-        p = list(np.array(average_p_scores).T)
-        return training_losses, validation_losses, f, p
+        if training_losses:
+            print(
+                f"Training loss: {training_losses[-1]:.5f}. "
+                f"Validation loss: {validation_losses[-1]:.5f}. "
+                f"Patience: {patience}"
+            )
+            print("Maximum number of epochs reached; stopping early.")
+            f = list(np.array(average_f_scores).T)
+            p = list(np.array(average_p_scores).T)
+            return training_losses, validation_losses, f, p
