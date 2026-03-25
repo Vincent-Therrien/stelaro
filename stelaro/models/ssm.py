@@ -152,7 +152,7 @@ class MambaMemorySequenceClassifier(nn.Module):
 
 class DownsamplingCNNTokenizer(nn.Module):
     """
-    CNN front-end that converts one-hot nucleotide sequences [B, L, 4]
+    CNN that converts one-hot nucleotide sequences [B, L, 4]
     into a downsampled token sequence [B, L_reduced, d_model].
     """
     def __init__(
@@ -271,7 +271,6 @@ class MambaSequenceClassifierMemoryCNN(nn.Module):
 
 
 class MambaSequenceClassifierResidual(nn.Module):
-    """A sequence classifier network that supports MLM."""
     def __init__(
         self,
         N: int,
@@ -371,7 +370,6 @@ class DualTimescaleMamba(nn.Module):
 
 
 class MambaSequenceClassifierDual(nn.Module):
-    """A sequence classifier network that supports MLM."""
     def __init__(
         self,
         N: int,
@@ -403,6 +401,7 @@ class MambaSequenceClassifierDual(nn.Module):
         self.norm = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
         self.classifier = nn.Linear(d_model, num_classes)
+        # self.mlm_head = nn.Linear(d_model, vocab_size + 1)
 
     def forward(self, x: torch.LongTensor) -> torch.Tensor:
         h = self.embedding(x)
@@ -446,7 +445,6 @@ class DualTimescaleMambaSeparate(nn.Module):
 
 
 class MambaSequenceClassifierDualCNN(nn.Module):
-    """A sequence classifier network that supports MLM."""
     def __init__(
         self,
         N: int,
