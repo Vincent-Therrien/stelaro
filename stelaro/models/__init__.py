@@ -549,6 +549,7 @@ def evaluate(classifier, loader, device, mapping, time_limit: float = None):
 
 
 def p_r_f1(classifier, loader, device) -> tuple[float]:
+    """Compute precision, recall, and F1 score for a classifier."""
     predicted_y = []
     real_y = []
     with no_grad():
@@ -574,6 +575,27 @@ def p_r_f1(classifier, loader, device) -> tuple[float]:
         average="macro",
     )
     return precision, recall, f1
+
+
+def label_based_precision(classifier, loader, device, n_classes) -> tuple[float]:
+    """Compute precision for each class at the lowest taxonomic level."""
+    predicted_y = []
+    real_y = []
+    with no_grad():
+        for x_batch, y_batch in tqdm(loader):
+            x_batch = x_batch.long().to(device)
+            y_batch = y_batch.to("cpu")
+            predictions = classifier.predict(x_batch).to("cpu")
+            predicted_y += predictions
+            real_y += y_batch
+    precisions = []
+    real_y = np.array(real_y)
+    predicted_y = np.array(predicted_y)
+    for c in tqdm(range(n_classes)):
+        tp = np.sum((predicted_y == c) & (real_y == c))
+        fp = np.sum((predicted_y == c) & (real_y != c))
+        precisions.append(tp / (tp + fp))
+    return precisions
 
 
 def benchmark_classifier(
@@ -623,13 +645,21 @@ def benchmark_classifier(
         string = string.replace("'", "")
         print(f"F1 score: {string}")
 
-        macro = collapse(
+        macro_precision = collapse(
             rank_based_precision(mappings, real_y, predicted_y, "macro", exclude_other)
         )
-        representation = [f"{v:.4}" for v in macro]
+        representation = [f"{v:.4}" for v in macro_precision]
         string = str(representation)
         string = string.replace("'", "")
         print(f"Macro precision score: {string}")
+
+        macro_recall = collapse(
+            rank_based_recall(mappings, real_y, predicted_y, "macro", exclude_other)
+        )
+        representation = [f"{v:.4}" for v in macro_recall]
+        string = str(representation)
+        string = string.replace("'", "")
+        print(f"Macro recall score: {string}")
 
         matrix = np.zeros((len(mapping), len(mapping)))
         for y, p in zip(real_y, predicted_y):
@@ -655,6 +685,33 @@ def rank_based_precision(
             labels = labels[:-1]
         p.append(
             precision_score(
+                normalized_target,
+                normalized_pred,
+                average=average,
+                labels=labels,
+                zero_division=0.0
+            )
+        )
+    return p
+
+
+def rank_based_recall(
+        mappings: dict,
+        target: list[int],
+        predictions: list[int],
+        average: str="macro",
+        exclude_other: bool = False
+        ) -> list[np.ndarray]:
+    """Evaluate precision at multiple taxonomic ranks."""
+    p = []
+    for mapping in mappings:
+        labels = list(set(mapping.values()))
+        normalized_target = [mapping[int(v)] for v in list(target)]
+        normalized_pred = [mapping[int(v)] for v in list(predictions)]
+        if exclude_other:
+            labels = labels[:-1]
+        p.append(
+            recall_score(
                 normalized_target,
                 normalized_pred,
                 average=average,
@@ -917,7 +974,7 @@ class Classifier(BaseClassifier):
             evaluation interval: Number of steps between evaluations.
             patience: Maximum increasing loss number before early stop.
             probability: Fraction of masked tokens.
-            pretraining_type: Type of pretraining (mlm or clm)
+            pretraining_type: Type of pretraining (mlm or causal)
         """
         num_batches, evaluation_n_batches = 0, 0
         lowest_loss = float("inf")

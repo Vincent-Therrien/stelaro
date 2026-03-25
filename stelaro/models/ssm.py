@@ -170,12 +170,20 @@ class DownsamplingCNNTokenizer(nn.Module):
         for i in range(n_layers):
             stride = 2 if current_factor < downsample_factor else 1
             current_factor *= stride
-            layers += [
-                nn.Conv1d(c, d_model, kernel_size,
-                          stride=stride, padding=kernel_size // 2),
-                nn.ReLU(),
-                nn.BatchNorm1d(d_model)
-            ]
+            if type(kernel_size) is int:
+                layers += [
+                    nn.Conv1d(c, d_model, kernel_size,
+                              stride=stride, padding=kernel_size // 2),
+                    nn.ReLU(),
+                    nn.BatchNorm1d(d_model)
+                ]
+            else:
+                layers += [
+                    nn.Conv1d(c, d_model, kernel_size[i],
+                              stride=stride, padding=kernel_size[i] // 2),
+                    nn.ReLU(),
+                    nn.BatchNorm1d(d_model)
+                ]
             c = d_model
         self.net = nn.Sequential(*layers)
 
@@ -195,9 +203,10 @@ class MambaSequenceClassifierCNN(nn.Module):
         d_conv: int = 4,
         expand: int = 2,
         dropout: float = 0.1,
+        kernel_size: int = 9,
     ):
         super().__init__()
-        self.tokenizer = DownsamplingCNNTokenizer(d_model=d_model)
+        self.tokenizer = DownsamplingCNNTokenizer(d_model=d_model, kernel_size=kernel_size)
         self.layers = nn.ModuleList([
             MambaBlock(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
             for _ in range(n_layers)
@@ -470,96 +479,6 @@ class MambaSequenceClassifierDualCNN(nn.Module):
         hFast = self.tokenizerFast(x)
         hSlow = self.tokenizerSlow(x)
         h = self.dual(hFast, hSlow)
-        for block in self.layers:
-            h = block(h)   # each Mamba block returns [B, L, d_model]
-        h = self.norm(h)
-        pooled = h.mean(dim=1)  # [B, d_model]
-        pooled = self.dropout(pooled)
-        logits = self.classifier(pooled)  # [B, num_classes]
-        return logits
-
-
-class MambaSequenceClassifierDualCNN_v3(nn.Module):
-    """A sequence classifier network that supports MLM."""
-    def __init__(
-        self,
-        N: int,
-        num_classes: int,
-        d_model: int,
-        n_layers: int,
-        d_state: int,
-        d_conv: int = 4,
-        expand: int = 2,
-        dropout: float = 0.05,
-        fast_dt=(0.00001, 0.01),
-        slow_dt=(0.001, 0.2),
-    ):
-        super().__init__()
-        self.tokenizerFast = nn.Embedding(256, d_model)
-        self.tokenizerSlow = DownsamplingCNNTokenizer(d_model=d_model, downsample_factor=4)
-        self.dual = DualTimescaleMambaSeparate(d_model=d_model, d_state=d_state, fast_dt=fast_dt, slow_dt=slow_dt)
-        self.layers = nn.ModuleList([MambaBlock(
-                d_model=d_model,
-                d_state=d_state,
-                d_conv=d_conv,
-                expand=expand,
-            ) for _ in range(n_layers - 2)
-        ])
-        self.norm = nn.LayerNorm(d_model)
-        self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-        self.classifier = nn.Linear(d_model, num_classes)
-
-    def forward(self, x: torch.LongTensor) -> torch.Tensor:
-        h_fast = self.tokenizerFast(x)
-        h_slow = format.tetramer_batch_to_onehot(x)
-        h_slow = h_slow.permute(0, 2, 1).float()
-        h_slow = self.tokenizerSlow(h_slow)
-        h = self.dual(h_fast, h_slow)
-        for block in self.layers:
-            h = block(h)   # each Mamba block returns [B, L, d_model]
-        h = self.norm(h)
-        pooled = h.mean(dim=1)  # [B, d_model]
-        pooled = self.dropout(pooled)
-        logits = self.classifier(pooled)  # [B, num_classes]
-        return logits
-
-
-class MambaSequenceClassifierDualCNN_v4(nn.Module):
-    """A sequence classifier network that supports MLM."""
-    def __init__(
-        self,
-        N: int,
-        num_classes: int,
-        d_model: int,
-        n_layers: int,
-        d_state: int,
-        d_conv: int = 4,
-        expand: int = 2,
-        dropout: float = 0.05,
-        fast_dt=(0.00001, 0.01),
-        slow_dt=(0.001, 0.2),
-    ):
-        super().__init__()
-        self.tokenizerFast = nn.Embedding(256, d_model)
-        self.tokenizerSlow = DownsamplingCNNTokenizer(d_model=d_model, downsample_factor=4)
-        self.dual = DualTimescaleMambaSeparate(d_model=d_model, d_state=d_state, fast_dt=fast_dt, slow_dt=slow_dt)
-        self.layers = nn.ModuleList([MambaBlock(
-                d_model=d_model,
-                d_state=d_state,
-                d_conv=d_conv,
-                expand=expand,
-            ) for _ in range(n_layers - 2)
-        ])
-        self.norm = nn.LayerNorm(d_model)
-        self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-        self.classifier = nn.Linear(d_model, num_classes)
-
-    def forward(self, x: torch.LongTensor) -> torch.Tensor:
-        h_fast = self.tokenizerFast(x)
-        h_slow = format.tetramer_batch_to_onehot(x)
-        h_slow = h_slow.permute(0, 2, 1).float()
-        h_slow = self.tokenizerSlow(h_slow)
-        h = self.dual(h_slow, h_fast)
         for block in self.layers:
             h = block(h)   # each Mamba block returns [B, L, d_model]
         h = self.norm(h)
