@@ -21,17 +21,19 @@
 import argparse
 from datetime import datetime, timezone
 import numpy as np
+from sklearn.metrics import f1_score, precision_score
 from torch.utils.data import Dataset, DataLoader
 from torch.optim import Adam
 from torch.nn import CrossEntropyLoss
-from torch import save, load, tensor
+from torch import argmax, save, load, tensor, no_grad
+from torch.nn.utils import clip_grad_norm_
 
 # Models ######################################################################
 
 
 
 
-# Utility functions ###########################################################
+# Training ####################################################################
 
 class LabelledDataset(Dataset):
     def __init__(self, directory: str):
@@ -66,32 +68,79 @@ def load_training_data(train, test, validate, batch_size):
     return train_data, test_data, validate_data
 
 
-def train_for_one_epoch(classifier, directory, train_data, validation_data, optimizer):
+def pretrain(classifier, directory, pretrain_data, optimizer):
     pass  # TODO
 
 
-def train_classifier(
-        classifier, directory: str, n_epochs: int, train_data, validation_data
+def train_for_one_epoch(model, train_data, optimizer, loss_function, device):
+    model.train()
+    for x_batch, y_batch in train_data:
+        x_batch = x_batch.to(device).long()
+        output = model(x_batch)
+        y_batch = y_batch.to(device).long()
+        loss = loss_function(output, y_batch)
+        optimizer.zero_grad()
+        loss.backward()
+        clip_grad_norm_(model.parameters(), 1.0)
+        optimizer.step()
+
+
+def train(
+        model, directory: str, n_epochs: int, train_data, validation_data, n_classes
     ) -> None:
-    parameters = classifier.get_parameters()
+    parameters = model.get_parameters()
     total_params = sum(param.numel() for param in parameters)
     print(f"Number of parameters: {total_params:_}")
-    optimizer = Adam(classifier.get_parameters(), lr=0.001)
+    optimizer = Adam(model.get_parameters(), lr=0.001)
+    loss_function = CrossEntropyLoss()
     for epoch in range(n_epochs):
         print(f"{datetime.now(timezone.utc).isoformat()}: Epoch {epoch}")
-        train_for_one_epoch(
-            classifier,
-            directory,
-            train_data,
-            validation_data,
-            optimizer,
+        train_for_one_epoch(model, train_data, optimizer, loss_function, "cuda")
+        save(model.state_dict(), f"{directory}weights_{epoch}_epoch.pt2")
+        validate(
+            model, validation_data, n_classes, "cuda", loss_function
         )
-        save(classifier.model.state_dict(), f"{directory}weights_{epoch}_epoch.pt2")
 
 
-def test_classifier(classifier, directory):
-    pass  # TODO
+# Evaluation ##################################################################
+def validate(model, validation_data, n_classes, device, loss_function=None):
+    model.eval()
+    n = 0
+    validation_loss = 0
+    real_y, predicted_y = [], []
+    with no_grad():
+        for x_batch, y_batch in validation_data:
+            n += len(y_batch)
+            x_batch = x_batch.to(device).long()
+            output = model(x_batch)
+            if loss_function:
+                loss = loss_function(output, y_batch)
+                validation_loss += loss.item()
+            predictions = argmax(output, dim=1)
+            predicted_y += predictions
+            real_y += y_batch
+    if loss_function:
+        validation_loss /= n
+        print(f"Average loss: {validation_loss}")
+    f1 = f1_score(
+        real_y,
+        predicted_y,
+        average="macro",
+        labels=range(n_classes),
+        zero_division=0.0
+    )
+    print(f"F1 score: {f1}")
+    precision = precision_score(
+        real_y,
+        predicted_y,
+        average="macro",
+        labels=range(n_classes),
+        zero_division=0.0
+    )
+    print(f"Precision: {precision}")
 
+
+# Arguments ###################################################################
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -102,7 +151,7 @@ if __name__ == "__main__":
     parser.add_argument("--validate", type=str, help="Filepath to validation set")
     parser.add_argument("--n_classes", type=int, help="Number of classes")
     parser.add_argument("--batch_size", type=int, help="Batch size")
-    parser.add_argument("--n_max_epochs", type=int, help="Maximum number of epochs")
+    parser.add_argument("--n_epochs", type=int, help="Maximum number of epochs")
     parser.add_argument("--directory", type=str, help="output directory (weights and results)")
     parser.add_argument(
         "--pretraining",
@@ -118,10 +167,12 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     # create
-
+    model = None
     # load
     if args.start_weight_epoch:
-        classifier.model.load_state_dict(load(f"{arg.directory}weights_{args.start_weight_epoch}_epoch.pt2"))
+        model.load_state_dict(load(f"{args.directory}weights_{args.start_weight_epoch}_epoch.pt2"))
     # train
-    train, test, validate = load_training_data(args.train, args.test, args.validate, args.batch_size)
+    train_data, test_data, validate_data = load_training_data(args.train, args.test, args.validate, args.batch_size)
+    train(model, args.directory, args.n_epochs, train_data, validation_data, args.n_classes)
     # test
+    validate(model, test_data, args.n_classes, "cuda")
