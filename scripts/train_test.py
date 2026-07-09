@@ -20,19 +20,23 @@
 
 import argparse
 from datetime import datetime, timezone
+from time import time
 import numpy as np
 from sklearn.metrics import f1_score, precision_score
 from torch.utils.data import Dataset, DataLoader
 from torch.optim import Adam
 from torch.nn import (CrossEntropyLoss, Module, Embedding, Linear, Parameter,
                       TransformerEncoderLayer, TransformerEncoder,
-                      Sequential, Conv1d, ReLU, BatchNorm1d)
-from torch import argmax, save, load, tensor, no_grad, arange, cat, randn
+                      Sequential, Conv1d, ReLU, BatchNorm1d, LayerNorm,
+                      ModuleList, Dropout, Identity)
+from torch import (argmax, save, load, tensor, no_grad, arange, cat, randn,
+                   LongTensor, Tensor)
 from torch.nn.utils import clip_grad_norm_
+from mamba_ssm import Mamba
 
 
 def log(msg):
-    print(f"{datetime.now(timezone.utc).isoformat()}: {msg}")
+    print(f"{datetime.now(timezone.utc).isoformat()} {msg}")
 
 
 # Models ######################################################################
@@ -81,6 +85,54 @@ class BERTax(Module):
             return logits
 
 
+class MambaBlock(Module):
+    def __init__(self, d_model, d_state, d_conv, expand):
+        super().__init__()
+        self.norm = LayerNorm(d_model)
+        self.mamba = Mamba(
+            d_model=d_model,
+            d_state=d_state,
+            d_conv=d_conv,
+            expand=expand
+        )
+
+    def forward(self, x):
+        return x + self.mamba(self.norm(x))
+
+
+class MambaClassifier(Module):
+    def __init__(
+        self,
+        num_classes: int,
+        vocab_size: int = 128,
+        d_model: int = 250,
+        n_layers: int = 6,
+        d_state: int = 16,
+        d_conv: int = 4,
+        expand: int = 2,
+        dropout: float = 0.05,
+    ):
+        super(MambaClassifier, self).__init__()
+        self.embedding = Embedding(vocab_size + 1, d_model)
+        self.layers = ModuleList([
+            MambaBlock(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
+            for _ in range(n_layers)
+        ])
+        self.norm = LayerNorm(d_model)
+        self.dropout = Dropout(dropout) if dropout > 0 else Identity()
+        self.classifier = Linear(d_model, num_classes)
+        self.mlm_head = Linear(d_model, vocab_size + 1)
+
+    def forward(self, x) -> Tensor:
+        h = self.embedding(x)
+        for block in self.layers:
+            h = block(h)   # each Mamba block returns [B, L, d_model]
+        h = self.norm(h)
+        pooled = h.mean(dim=1)  # [B, d_model]
+        pooled = self.dropout(pooled)
+        logits = self.classifier(pooled)  # [B, num_classes]
+        return logits
+
 # Training ####################################################################
 
 class LabelledDataset(Dataset):
@@ -126,8 +178,10 @@ def pretrain(classifier, directory, pretrain_data, optimizer):
 
 def train_for_one_epoch(model, train_data, optimizer, loss_function, device):
     model.train()
+    total_steps = len(train_data)
     i = 0
     for x_batch, y_batch in train_data:
+        start = time()
         x_batch = x_batch.to(device).long()
         y_batch = y_batch.to(device).long()
         output = model(x_batch)
@@ -136,10 +190,15 @@ def train_for_one_epoch(model, train_data, optimizer, loss_function, device):
         loss.backward()
         clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
+        end = time()
+        # Tracking
+        if i == 10:  # Wait until duration stabilizes.
+            duration = end - start
+            total = duration * total_steps
+            log(f"Step duration: {duration:.3}. Estimated total duration: {int(total):_} s.")
+        elif i % 1000 == 0:
+            log(f"Training step {i}.")
         i += 1
-        log(i)
-        if i > 250:
-            break
 
 
 def train(
@@ -166,8 +225,10 @@ def validate(model, validation_data, n_classes, device, loss_function=None):
     validation_loss = 0
     real_y, predicted_y = [], []
     i = 0
+    total_steps = len(validation_data)
     with no_grad():
         for x_batch, y_batch in validation_data:
+            start = time()
             n += len(y_batch)
             x_batch = x_batch.to(device).long()
             y_batch = y_batch.to(device).long()
@@ -178,11 +239,15 @@ def validate(model, validation_data, n_classes, device, loss_function=None):
             predictions = argmax(output, dim=1)
             predicted_y += predictions
             real_y += y_batch
-            # TMP
+            end = time()
+            # Tracking
+            if i == 0:
+                duration = end - start
+                total = duration * total_steps
+                log(f"Step duration: {duration:.3} s. Estimated total duration: {int(total):_} s.")
+            elif i % 1000 == 0:
+                log(f"Evaluation step {i}.")
             i += 1
-            if i > 50:
-                break
-            # TMP
     if loss_function:
         validation_loss /= n
         log(f"Average loss: {validation_loss}")
@@ -218,6 +283,7 @@ if __name__ == "__main__":
     parser.add_argument("--n_epochs", type=int, help="Maximum number of epochs")
     parser.add_argument("--directory", type=str, help="output directory (weights and results)")
     parser.add_argument("--device", type=str, help="Either `cpu` or `cuda`.")
+    parser.add_argument("--model", type=str, help="Name of the model to train and test.")
     parser.add_argument(
         "--pretraining",
         type=str,
@@ -231,8 +297,13 @@ if __name__ == "__main__":
         help="Optional epoch from which to lead weights (default: None)"
     )
     args = parser.parse_args()
+
     log(f"Creating the model.")
-    model = BERTax(500, args.n_classes, 128)  # test
+    n_classes = int(args.n_classes)
+    if args.model.lower() == "bertax":
+        model = BERTax(500, n_classes)
+    elif args.model.lower() == "mamba":
+        model = MambaClassifier(n_classes)
     model = model.to(args.device)
     if args.start_weight_epoch:
         log(f"Loading the model")
@@ -244,23 +315,3 @@ if __name__ == "__main__":
     # test
     log("Test the trained model.")
     validate(model, test_data, args.n_classes, args.device)
-
-
-
-# 250
-# 2026-07-05T14:08:16.521536+00:00: Average loss: 0.311730075116251
-# 2026-07-05T14:08:16.731554+00:00: F1 score: 0.0004253250698748329
-# 2026-07-05T14:08:16.760196+00:00: Precision: 0.00021995977878330823
-# 2026-07-05T14:08:16.761134+00:00: Test the trained model.
-# 2026-07-05T14:08:31.491923+00:00: F1 score: 7.807864080702083e-05
-# 2026-07-05T14:08:31.518821+00:00: Precision: 3.927853192559075e-05
-
-# 500
-# 2026-07-05T14:24:10.276973+00:00: Average loss: 0.3086799505878897
-# 2026-07-05T14:24:10.489036+00:00: F1 score: 0.0006133500882625737
-# 2026-07-05T14:24:10.517356+00:00: Precision: 0.00032208396178984414
-# 2026-07-05T14:24:10.518005+00:00: Test the trained model.
-# 2026-07-05T14:24:24.769317+00:00: F1 score: 3.1345997116168264e-05
-# 2026-07-05T14:24:24.796333+00:00: Precision: 1.5711412770236298e-05
-
-# 750
