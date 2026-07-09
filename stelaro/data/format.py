@@ -40,6 +40,27 @@ def encode_tetramer(sequence: str) -> list[int]:
     return [encode_four_nucleotides(t) for t in tetramers]
 
 
+def encode_trimer(sequence: str) -> list[int]:
+    """Convert a nucleotide sequence into trimer encoding.
+
+    Args:
+        sequence: Nucleotide sequence, in string (ACGT).
+
+    Returns: 3-mer encoded sequence.
+    """
+    if any(base not in 'ACGT' for base in sequence):
+        raise ValueError("Input must be a 4-character string containing only A, C, G, T.")
+
+    def encode_three_nucleotides(trimer):
+        result = 0
+        for base in trimer:
+            result = (result << 2) | BASE_TO_BITS[base]
+        return result
+
+    trimers = [sequence[i:i+3] for i in range(0, len(sequence), 3)]
+    return [encode_three_nucleotides(t) for t in trimers]
+
+
 def decode_tetramer(sequence: list[int]) -> str:
     """Convert a tetramer encoding into a nucleotide sequence.
 
