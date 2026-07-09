@@ -133,8 +133,8 @@ class MambaClassifier(Module):
         logits = self.classifier(pooled)  # [B, num_classes]
         return logits
 
-# Training ####################################################################
 
+# Training ####################################################################
 class LabelledDataset(Dataset):
     def __init__(self, directory: str):
         assert directory.endswith('/')
@@ -195,14 +195,15 @@ def train_for_one_epoch(model, train_data, optimizer, loss_function, device):
         if i == 10:  # Wait until duration stabilizes.
             duration = end - start
             total = duration * total_steps
-            log(f"Step duration: {duration:.3}. Estimated total duration: {int(total):_} s.")
-        elif i % 1000 == 0:
+            log(f"Step duration: {duration:.3} s. Estimated total duration: {int(total):_} s.")
+        elif i and i % 1000 == 0:
             log(f"Training step {i}.")
+            break  # TMP!!!
         i += 1
 
 
 def train(
-        model, directory: str, n_epochs: int, train_data, validation_data, n_classes, device
+        model, directory: str, n_epochs: int, train_data, validation_data, n_classes, device, start_epoch
     ) -> None:
     parameters = model.parameters()
     total_params = sum(param.numel() for param in parameters)
@@ -210,9 +211,12 @@ def train(
     optimizer = Adam(model.parameters(), lr=0.001)
     loss_function = CrossEntropyLoss()
     for epoch in range(n_epochs):
-        log(f"Epoch {epoch}")
+        actual_epoch = start_epoch + epoch
+        log(f"Epoch {actual_epoch + 1}")
         train_for_one_epoch(model, train_data, optimizer, loss_function, device)
-        save(model.state_dict(), f"{directory}weights_{epoch + 1}_epoch.pt2")
+        log(f"Saving the model at the end of epoch {actual_epoch + 1}.")
+        save(model.state_dict(), f"{directory}weights_{actual_epoch + 1}_epoch.pt2")
+        log("Validating the model.")
         validate(
             model, validation_data, n_classes, device, loss_function
         )
@@ -237,20 +241,21 @@ def validate(model, validation_data, n_classes, device, loss_function=None):
                 loss = loss_function(output, y_batch)
                 validation_loss += loss.item()
             predictions = argmax(output, dim=1)
-            predicted_y += predictions
-            real_y += y_batch
+            predicted_y += predictions.cpu()
+            real_y += y_batch.cpu()
             end = time()
             # Tracking
             if i == 0:
                 duration = end - start
                 total = duration * total_steps
                 log(f"Step duration: {duration:.3} s. Estimated total duration: {int(total):_} s.")
-            elif i % 1000 == 0:
+            elif i and i % 1000 == 0:
                 log(f"Evaluation step {i}.")
+                break  # TMP!!!
             i += 1
     if loss_function:
         validation_loss /= n
-        log(f"Average loss: {validation_loss}")
+        log(f"Average loss: {validation_loss:.5}")
     f1 = f1_score(
         real_y,
         predicted_y,
@@ -258,7 +263,7 @@ def validate(model, validation_data, n_classes, device, loss_function=None):
         labels=range(n_classes),
         zero_division=0.0
     )
-    log(f"F1 score: {f1}")
+    log(f"F1 score: {f1:.5}")
     precision = precision_score(
         real_y,
         predicted_y,
@@ -266,11 +271,10 @@ def validate(model, validation_data, n_classes, device, loss_function=None):
         labels=range(n_classes),
         zero_division=0.0
     )
-    log(f"Precision: {precision}")
+    log(f"Precision: {precision:.5}")
 
 
 # Arguments ###################################################################
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Model benchmarking."
@@ -297,6 +301,7 @@ if __name__ == "__main__":
         help="Optional epoch from which to lead weights (default: None)"
     )
     args = parser.parse_args()
+    assert args.directory.endswith("/"), "`directory` must be a directory."
 
     log(f"Creating the model.")
     n_classes = int(args.n_classes)
@@ -306,12 +311,15 @@ if __name__ == "__main__":
         model = MambaClassifier(n_classes)
     model = model.to(args.device)
     if args.start_weight_epoch:
-        log(f"Loading the model")
-        model.load_state_dict(load(f"{args.directory}weights_{args.start_weight_epoch}_epoch.pt2"))
+        start_epoch = args.start_weight_epoch
+        log(f"Loading the model at epoch {start_epoch}.")
+        model.load_state_dict(load(f"{args.directory}weights_{start_epoch}_epoch.pt2"))
+    else:
+        start_epoch = 0
     log("Load training data.")
     train_data, test_data, validate_data = load_training_data(args.train, args.test, args.validate, args.batch_size)
     log("Train the model.")
-    train(model, args.directory, args.n_epochs, train_data, validate_data, args.n_classes, args.device)
+    train(model, args.directory, args.n_epochs, train_data, validate_data, args.n_classes, args.device, start_epoch)
     # test
     log("Test the trained model.")
     validate(model, test_data, args.n_classes, args.device)
