@@ -27,13 +27,15 @@ from torch.utils.data import Dataset, DataLoader
 from torch.optim import Adam
 from torch.nn import (CrossEntropyLoss, Module, Embedding, Linear, Parameter,
                       TransformerEncoderLayer, TransformerEncoder,
-                      LayerNorm, ModuleList, Dropout, Identity)
+                      LayerNorm, ModuleList, Dropout, Identity, BatchNorm1d,
+                      Conv1d, ReLU, Sequential)
 from torch import (argmax, save, load, tensor, no_grad, arange, cat, randn,
                    Tensor, full, bernoulli, randint)
 import torch
 from torch.nn.utils import clip_grad_norm_
 import torch.nn.functional as F
 from mamba_ssm import Mamba
+from math import sqrt
 
 
 def log(msg):
@@ -47,20 +49,24 @@ class BERTax(Module):
             N: int,
             num_classes: int,
             embed_dim: int = 250,
-            vocab_size: int = 128,
+            vocab_size: int = 64,
             n_head: int = 5,
             dropout: float = 0.05,
             n_layers: int = 6,
             ):
         super(BERTax, self).__init__()
+        self.embed_dim = embed_dim
         self.token_embedding = Embedding(vocab_size + 1, embed_dim)
+        self.emb_layer_norm = LayerNorm(embed_dim)
+        self.dropout = Dropout(dropout)
         encoder_layer = TransformerEncoderLayer(
             d_model=embed_dim,
             nhead=n_head,
             dim_feedforward=embed_dim * 4,
             dropout=dropout,
             activation='relu',
-            batch_first=True  # makes input/output shape [B, L, D]
+            batch_first=True,  # makes input/output shape [B, L, D]
+            norm_first=True
         )
         self.transformer_encoder = TransformerEncoder(encoder_layer, num_layers=n_layers)
         self.mlm_head = Linear(embed_dim, vocab_size + 1)
@@ -70,11 +76,12 @@ class BERTax(Module):
 
     def forward(self, x, mlm=None):
         batch_size, seq_len = x.size()
-        token_embedding = self.token_embedding(x)
-        cls = self.cls_token.repeat(batch_size, 1, 1) # (B, 1, D)
-        x = cat([cls, token_embedding], dim=1) # (B, L+1, D)
+        token_embeddings = self.token_embedding(x) * sqrt(self.embed_dim)
+        cls_tokens = self.cls_token.repeat(batch_size, 1, 1) * sqrt(self.embed_dim)
+        x = cat([cls_tokens, token_embeddings], dim=1)  # Shape: [B, L + 1, D]
         positions = arange(0, seq_len + 1, device=x.device).unsqueeze(0).expand(batch_size, -1)
         x = x + self.position_embedding(positions)
+        x = self.dropout(self.emb_layer_norm(x))
         h = self.transformer_encoder(x)  # [B, L+1, D]
         if mlm is not None:
             h = h[:, 1:, :]
@@ -105,7 +112,7 @@ class MambaClassifier(Module):
     def __init__(
         self,
         num_classes: int,
-        vocab_size: int = 128,
+        vocab_size: int = 64,
         d_model: int = 250,
         n_layers: int = 6,
         d_state: int = 16,
@@ -126,6 +133,84 @@ class MambaClassifier(Module):
 
     def forward(self, x) -> Tensor:
         h = self.embedding(x)
+        for block in self.layers:
+            h = block(h)   # each Mamba block returns [B, L, d_model]
+        h = self.norm(h)
+        pooled = h.mean(dim=1)  # [B, d_model]
+        pooled = self.dropout(pooled)
+        logits = self.classifier(pooled)  # [B, num_classes]
+        return logits
+
+
+class DownsamplingCNN(Module):
+    """Converts [B, 4, L] into [B, L_reduced, d_model]."""
+    def __init__(
+        self,
+        in_channels=4,
+        d_model=250,
+        n_layers=2,
+        kernel_size=9,
+        downsample_factor=4,
+    ):
+        super().__init__()
+        layers = []
+        c = in_channels
+        current_factor = 1
+        for i in range(n_layers):
+            stride = 2 if current_factor < downsample_factor else 1
+            current_factor *= stride
+            if type(kernel_size) is int:
+                layers += [
+                    Conv1d(c, d_model, kernel_size,
+                           stride=stride, padding=kernel_size // 2),
+                    ReLU(),
+                    BatchNorm1d(d_model)
+                ]
+            else:
+                layers += [
+                    Conv1d(c, d_model, kernel_size[i],
+                           stride=stride, padding=kernel_size[i] // 2),
+                    ReLU(),
+                    BatchNorm1d(d_model)
+                ]
+            c = d_model
+        self.net = Sequential(*layers)
+
+    def forward(self, x):
+        h = self.net(x)  # [B, d_model, L_reduced]
+        return h.transpose(1, 2)  # [B, L_reduced, d_model]
+
+
+class MambaClassifierCNN(Module):
+    def __init__(
+        self,
+        num_classes: int,
+        d_model: int = 100,
+        n_layers: int = 6,
+        d_state: int = 16,
+        d_conv: int = 4,
+        expand: int = 2,
+        dropout: float = 0.05,
+    ):
+        super(MambaClassifierCNN, self).__init__()
+        self.embedding = DownsamplingCNN(d_model=d_model, kernel_size=9)
+        self.layers = ModuleList([
+            MambaBlock(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
+            for _ in range(n_layers)
+        ])
+        self.norm = LayerNorm(d_model)
+        self.dropout = Dropout(dropout) if dropout > 0 else Identity()
+        self.classifier = Linear(d_model, num_classes)
+
+    def forward(self, x) -> Tensor:
+        batch_size, _ = x.size()
+        n1 = x // 16
+        n2 = (x // 4) % 4
+        n3 = x % 4
+        nucleotides = torch.stack([n1, n2, n3], dim=2).view(batch_size, -1)
+        one_hot = F.one_hot(nucleotides, num_classes=4).float()
+        x_onehot = one_hot.transpose(1, 2)  # [B, 4, 3 * L]
+        h = self.embedding(x_onehot)
         for block in self.layers:
             h = block(h)   # each Mamba block returns [B, L, d_model]
         h = self.norm(h)
@@ -179,7 +264,7 @@ def pretrain(classifier, pretrain_filepath, batch_size, device):
     total_steps = len(dataloader)
     log(f"Number of pretraining batches: {total_steps}")
     criterion = CrossEntropyLoss(ignore_index=-100)
-    vocab_size = 128
+    vocab_size = 64
     mask_token_id = vocab_size
     classifier.train()
 
@@ -378,6 +463,9 @@ if __name__ == "__main__":
         model = BERTax(500, n_classes)
     elif args.model.lower() == "mamba":
         model = MambaClassifier(n_classes)
+    elif args.model.lower() == "mamba-cnn":
+        model = MambaClassifierCNN(n_classes)
+
     model = model.to(args.device)
     if args.start_weight_epoch:
         start_epoch = args.start_weight_epoch
