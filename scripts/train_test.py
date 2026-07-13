@@ -27,11 +27,12 @@ from torch.utils.data import Dataset, DataLoader
 from torch.optim import Adam
 from torch.nn import (CrossEntropyLoss, Module, Embedding, Linear, Parameter,
                       TransformerEncoderLayer, TransformerEncoder,
-                      Sequential, Conv1d, ReLU, BatchNorm1d, LayerNorm,
-                      ModuleList, Dropout, Identity)
+                      LayerNorm, ModuleList, Dropout, Identity)
 from torch import (argmax, save, load, tensor, no_grad, arange, cat, randn,
-                   LongTensor, Tensor)
+                   Tensor, full, bernoulli, randint)
+import torch
 from torch.nn.utils import clip_grad_norm_
+import torch.nn.functional as F
 from mamba_ssm import Mamba
 
 
@@ -47,7 +48,7 @@ class BERTax(Module):
             num_classes: int,
             embed_dim: int = 250,
             vocab_size: int = 128,
-            n_head: int = 4,
+            n_head: int = 5,
             dropout: float = 0.05,
             n_layers: int = 6,
             ):
@@ -151,8 +152,8 @@ class LabelledDataset(Dataset):
 
 
 class PretrainingDataset(Dataset):
-    def __init__(self, directory: str):
-        self.x = np.load(directory + "x.npy")
+    def __init__(self, filepath: str):
+        self.x = np.load(filepath)
 
     def __len__(self):
         return len(self.x)
@@ -172,8 +173,78 @@ def load_training_data(train, test, validate, batch_size):
     return train_data, test_data, validate_data
 
 
-def pretrain(classifier, directory, pretrain_data, optimizer):
-    pass  # TODO
+def pretrain(classifier, pretrain_filepath, batch_size, device):
+    optimizer = Adam(model.parameters(), lr=0.001)
+    dataloader = DataLoader(PretrainingDataset(pretrain_filepath), batch_size=batch_size, shuffle=True)
+    total_steps = len(dataloader)
+    log(f"Number of pretraining batches: {total_steps}")
+    criterion = CrossEntropyLoss(ignore_index=-100)
+    vocab_size = 128
+    mask_token_id = vocab_size
+    classifier.train()
+
+    total_loss = 0.0
+    running_entropy = 0.0
+    entropy_element_count = 0
+
+    for batch_idx, x in enumerate(dataloader):
+        a = time()
+        x = x.to(device).long()
+        targets = x.clone()
+
+        # 1. Generate Mask Matrix (15%)
+        probability_matrix = full(x.shape, 0.15, device=device)
+        masked_indices = bernoulli(probability_matrix).bool()
+        targets[~masked_indices] = -100
+
+        # 2. Apply 80/10/10 Rule
+        indices_replaced = bernoulli(full(x.shape, 0.8, device=device)).bool() & masked_indices
+        x[indices_replaced] = mask_token_id
+
+        indices_random = bernoulli(full(x.shape, 0.5, device=device)).bool() & masked_indices & ~indices_replaced
+        random_tokens = randint(0, vocab_size, x.shape, device=device)
+        x[indices_random] = random_tokens[indices_random]
+
+        # 3. Forward Pass
+        optimizer.zero_grad()
+        logits = classifier(x, mlm=True) # Shape: [B, L, vocab_size + 1]
+
+        # 4. Calculate MLM Loss
+        loss = criterion(logits.view(-1, vocab_size + 1), targets.view(-1))
+        loss.backward()
+        optimizer.step()
+
+        total_loss += loss.item()
+
+        # 5. Track Prediction Entropy on Masked Tokens Only
+        with no_grad():
+            # Get probabilities for all items: [B * L, V]
+            probs = F.softmax(logits.view(-1, vocab_size + 1), dim=-1)
+
+            # Calculate element-wise entropy: -p * log(p)
+            # Add small eps (1e-9) to avoid log(0)
+            token_entropy = -torch.sum(probs * torch.log(probs + 1e-9), dim=-1)
+
+            # Filter out unmasked locations using the flattened targets matrix
+            flat_targets = targets.view(-1)
+            masked_token_mask = flat_targets != -100
+
+            # Accumulate entropy calculations
+            running_entropy += token_entropy[masked_token_mask].sum().item()
+            entropy_element_count += masked_token_mask.sum().item()
+
+        b = time()
+
+        # 6. Periodic Reporting (Every 1000 steps)
+        step = batch_idx + 1
+        if step == 50:
+            duration = b - a
+            total = duration * total_steps
+            log(f"Step duration: {duration:.3} s. Estimated total duration: {int(total):_} s.")
+        if step % 1000 == 0:
+            avg_loss = total_loss / step
+            avg_entropy = running_entropy / max(1, entropy_element_count)
+            log(f"Step {step}. Avg Loss: {avg_loss:.4f} | Masked Token Entropy: {avg_entropy:.4f}")
 
 
 def train_for_one_epoch(model, train_data, optimizer, loss_function, device):
@@ -192,13 +263,12 @@ def train_for_one_epoch(model, train_data, optimizer, loss_function, device):
         optimizer.step()
         end = time()
         # Tracking
-        if i == 10:  # Wait until duration stabilizes.
+        if i == 50:  # Wait until duration stabilizes.
             duration = end - start
             total = duration * total_steps
             log(f"Step duration: {duration:.3} s. Estimated total duration: {int(total):_} s.")
         elif i and i % 1000 == 0:
             log(f"Training step {i}.")
-            break  # TMP!!!
         i += 1
 
 
@@ -245,13 +315,12 @@ def validate(model, validation_data, n_classes, device, loss_function=None):
             real_y += y_batch.cpu()
             end = time()
             # Tracking
-            if i == 0:
+            if i == 50:  # Wait until duration stabilizes.
                 duration = end - start
                 total = duration * total_steps
                 log(f"Step duration: {duration:.3} s. Estimated total duration: {int(total):_} s.")
             elif i and i % 1000 == 0:
                 log(f"Evaluation step {i}.")
-                break  # TMP!!!
             i += 1
     if loss_function:
         validation_loss /= n
@@ -316,10 +385,18 @@ if __name__ == "__main__":
         model.load_state_dict(load(f"{args.directory}weights_{start_epoch}_epoch.pt2"))
     else:
         start_epoch = 0
+
+    if args.pretraining:
+        log("Pretrain the model.")
+        pretrain(model, args.pretraining, args.batch_size, args.device)
+        log(f"Saving the model at the end of pretraining.")
+        save(model.state_dict(), f"{args.directory}weights_pretraining_epoch.pt2")
+
     log("Load training data.")
     train_data, test_data, validate_data = load_training_data(args.train, args.test, args.validate, args.batch_size)
-    log("Train the model.")
-    train(model, args.directory, args.n_epochs, train_data, validate_data, args.n_classes, args.device, start_epoch)
-    # test
+    if args.n_epochs > 0:
+        log("Train the model.")
+        train(model, args.directory, args.n_epochs, train_data, validate_data, args.n_classes, args.device, start_epoch)
+
     log("Test the trained model.")
     validate(model, test_data, args.n_classes, args.device)
