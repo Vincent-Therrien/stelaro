@@ -34,7 +34,7 @@ from torch import (argmax, save, load, tensor, no_grad, arange, cat, randn,
 import torch
 from torch.nn.utils import clip_grad_norm_
 import torch.nn.functional as F
-from mamba_ssm import Mamba
+from mamba_ssm import Mamba, Mamba2
 from math import sqrt
 
 
@@ -142,6 +142,125 @@ class MambaClassifier(Module):
         return logits
 
 
+class MambaClassifierAttention(Module):
+    def __init__(
+        self,
+        num_classes: int,
+        vocab_size: int = 64,
+        d_model: int = 250,
+        n_layers: int = 6,
+        d_state: int = 16,
+        d_conv: int = 4,
+        expand: int = 2,
+        dropout: float = 0.05,
+    ):
+        super(MambaClassifier, self).__init__()
+        self.embedding = Embedding(vocab_size + 1, d_model)
+        self.layers = ModuleList([
+            MambaBlock(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
+            for _ in range(n_layers)
+        ])
+        self.norm = LayerNorm(d_model)
+        self.attn_projection = Linear(d_model, 1, bias=False)
+        self.dropout = Dropout(dropout) if dropout > 0 else Identity()
+        self.classifier = Linear(d_model, num_classes)
+
+    def forward(self, x) -> Tensor:
+        h = self.embedding(x)
+        for block in self.layers:
+            h = block(h)   # [B, L, d_model]
+        h = self.norm(h)
+        attn_scores = self.attn_projection(h)
+        attn_weights = torch.softmax(attn_scores, dim=1)
+        pooled = torch.sum(h * attn_weights, dim=1)
+        pooled = self.dropout(pooled)
+        logits = self.classifier(pooled)  # [B, num_classes]
+        return logits
+
+
+class Mamba2Block(Module):
+    def __init__(self, d_model, d_state, d_conv, expand):
+        super().__init__()
+        self.norm = LayerNorm(d_model)
+        self.mamba = Mamba2(
+            d_model=d_model,
+            d_state=d_state,
+            d_conv=d_conv,
+            expand=expand,
+            headdim=64
+        )
+
+    def forward(self, x):
+        return x + self.mamba(self.norm(x))
+
+
+class Mamba2Classifier(Module):
+    def __init__(
+        self,
+        num_classes: int,
+        vocab_size: int = 64,
+        d_model: int = 256,
+        n_layers: int = 6,
+        d_state: int = 16,
+        d_conv: int = 4,
+        expand: int = 2,
+        dropout: float = 0.05,
+    ):
+        super(Mamba2Classifier, self).__init__()
+        self.embedding = Embedding(vocab_size + 1, d_model)
+        self.layers = ModuleList([
+            Mamba2Block(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
+            for _ in range(n_layers)
+        ])
+        self.norm = LayerNorm(d_model)
+        self.dropout = Dropout(dropout) if dropout > 0 else Identity()
+        self.classifier = Linear(d_model, num_classes)
+        self.mlm_head = Linear(d_model, vocab_size + 1)
+
+    def forward(self, x) -> Tensor:
+        h = self.embedding(x)
+        for block in self.layers:
+            h = block(h)   # each Mamba block returns [B, L, d_model]
+        h = self.norm(h)
+        pooled = h.mean(dim=1)  # [B, d_model]
+        pooled = self.dropout(pooled)
+        logits = self.classifier(pooled)  # [B, num_classes]
+        return logits
+
+
+class MambaClassifierLarge(Module):
+    def __init__(
+        self,
+        num_classes: int,
+        vocab_size: int = 64,
+        d_model: int = 250,
+        n_layers: int = 12,
+        d_state: int = 16,
+        d_conv: int = 4,
+        expand: int = 2,
+        dropout: float = 0.05,
+    ):
+        super(MambaClassifierLarge, self).__init__()
+        self.embedding = Embedding(vocab_size + 1, d_model)
+        self.layers = ModuleList([
+            MambaBlock(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
+            for _ in range(n_layers)
+        ])
+        self.norm = LayerNorm(d_model)
+        self.dropout = Dropout(dropout) if dropout > 0 else Identity()
+        self.classifier = Linear(d_model, num_classes)
+
+    def forward(self, x) -> Tensor:
+        h = self.embedding(x)
+        for block in self.layers:
+            h = block(h)   # each Mamba block returns [B, L, d_model]
+        h = self.norm(h)
+        pooled = h.mean(dim=1)  # [B, d_model]
+        pooled = self.dropout(pooled)
+        logits = self.classifier(pooled)  # [B, num_classes]
+        return logits
+
+
 class DownsamplingCNN(Module):
     """Converts [B, 4, L] into [B, L_reduced, d_model]."""
     def __init__(
@@ -211,6 +330,98 @@ class MambaClassifierCNN(Module):
         one_hot = F.one_hot(nucleotides, num_classes=4).float()
         x_onehot = one_hot.transpose(1, 2)  # [B, 4, 3 * L]
         h = self.embedding(x_onehot)
+        for block in self.layers:
+            h = block(h)   # each Mamba block returns [B, L, d_model]
+        h = self.norm(h)
+        pooled = h.mean(dim=1)  # [B, d_model]
+        pooled = self.dropout(pooled)
+        logits = self.classifier(pooled)  # [B, num_classes]
+        return logits
+
+
+class AdjustableMambaBlock(Module):
+    def __init__(self, d_model, d_state, d_conv, expand, m, M):
+        super().__init__()
+        self.norm = LayerNorm(d_model)
+        self.mamba = Mamba(
+            d_model=d_model,
+            d_state=d_state,
+            d_conv=d_conv,
+            expand=expand,
+            dt_min = m,
+            dt_max=M,
+        )
+
+    def forward(self, x):
+        return x + self.mamba(self.norm(x))
+
+
+class DualTimescaleMamba(Module):
+    def __init__(self, d_model, d_state, fast_dt=(0.00001, 0.01), slow_dt=(0.001, 0.2)):
+        super().__init__()
+        self.in_proj = Linear(d_model, d_model * 2)
+        self.ssm_fast = AdjustableMambaBlock(
+            d_model=d_model,
+            d_state=d_state,
+            d_conv=4,
+            expand=2,
+            m=fast_dt[0],
+            M=fast_dt[1],
+        )
+        self.ssm_slow = AdjustableMambaBlock(
+            d_model=d_model,
+            d_state=d_state,
+            d_conv=4,
+            expand=2,
+            m=slow_dt[0],
+            M=slow_dt[1],
+        )
+        self.gate = Linear(d_model, d_model)
+        self.out_proj = Linear(d_model, d_model)
+
+    def forward(self, x):
+        u, v = self.in_proj(x).chunk(2, dim=-1)
+        y_fast = self.ssm_fast(u)
+        y_slow = self.ssm_slow(u)
+        g = torch.sigmoid(self.gate(v))
+        y = g * y_fast + (1 - g) * y_slow
+        return self.out_proj(y)
+
+
+class MambaClassifierDual(Module):
+    def __init__(
+        self,
+        num_classes: int,
+        vocab_size: int = 64,
+        d_model: int = 250,
+        n_layers: int = 6,
+        d_state: int = 16,
+        d_conv: int = 4,
+        expand: int = 2,
+        dropout: float = 0.05,
+        fast_dt=(0.00001, 0.01),
+        slow_dt=(0.001, 0.2),
+    ):
+        super().__init__()
+        self.embedding = Embedding(vocab_size + 1, d_model)
+        self.layers = ModuleList([
+            DualTimescaleMamba(d_model=d_model, d_state=d_state, fast_dt=fast_dt, slow_dt=slow_dt)
+        ])
+        for _ in range(n_layers - 2):
+            self.layers.append(
+                MambaBlock(
+                    d_model=d_model,
+                    d_state=d_state,
+                    d_conv=d_conv,
+                    expand=expand,
+                )
+            )
+        self.norm = LayerNorm(d_model)
+        self.dropout = Dropout(dropout) if dropout > 0 else Identity()
+        self.classifier = Linear(d_model, num_classes)
+
+    def forward(self, x: torch.LongTensor) -> torch.Tensor:
+        h = self.embedding(x)
         for block in self.layers:
             h = block(h)   # each Mamba block returns [B, L, d_model]
         h = self.norm(h)
@@ -465,6 +676,14 @@ if __name__ == "__main__":
         model = MambaClassifier(n_classes)
     elif args.model.lower() == "mamba-cnn":
         model = MambaClassifierCNN(n_classes)
+    elif args.model.lower() == "mamba-dual":
+        model = MambaClassifierDual(n_classes)
+    elif args.model.lower() == "mamba-large":
+        model = MambaClassifierLarge(n_classes)
+    elif args.model.lower() == "mamba-2":
+        model = Mamba2Classifier(n_classes)
+    elif args.model.lower() == "mamba-attention":
+        model = MambaClassifierAttention(n_classes)
 
     model = model.to(args.device)
     if args.start_weight_epoch:
