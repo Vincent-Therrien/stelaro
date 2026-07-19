@@ -36,6 +36,7 @@ from torch.nn.utils import clip_grad_norm_
 import torch.nn.functional as F
 from mamba_ssm import Mamba, Mamba2
 from math import sqrt
+from tokenizers import Tokenizer
 
 
 def log(msg):
@@ -130,6 +131,39 @@ class MambaClassifier(Module):
         self.dropout = Dropout(dropout) if dropout > 0 else Identity()
         self.classifier = Linear(d_model, num_classes)
         self.mlm_head = Linear(d_model, vocab_size + 1)
+
+    def forward(self, x) -> Tensor:
+        h = self.embedding(x)
+        for block in self.layers:
+            h = block(h)   # each Mamba block returns [B, L, d_model]
+        h = self.norm(h)
+        pooled = h.mean(dim=1)  # [B, d_model]
+        pooled = self.dropout(pooled)
+        logits = self.classifier(pooled)  # [B, num_classes]
+        return logits
+
+
+class MambaClassifierBPE(Module):
+    def __init__(
+        self,
+        num_classes: int,
+        vocab_size: int = 8196,
+        d_model: int = 250,
+        n_layers: int = 6,
+        d_state: int = 16,
+        d_conv: int = 4,
+        expand: int = 2,
+        dropout: float = 0.05,
+    ):
+        super(MambaClassifierBPE, self).__init__()
+        self.embedding = Embedding(vocab_size + 1, d_model)
+        self.layers = ModuleList([
+            MambaBlock(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
+            for _ in range(n_layers)
+        ])
+        self.norm = LayerNorm(d_model)
+        self.dropout = Dropout(dropout) if dropout > 0 else Identity()
+        self.classifier = Linear(d_model, num_classes)
 
     def forward(self, x) -> Tensor:
         h = self.embedding(x)
@@ -432,17 +466,43 @@ class MambaClassifierDual(Module):
 
 
 # Training ####################################################################
+def decode_trimer(encoded_sequence: list[int]) -> str:
+    BITS_TO_BASE = {0: 'A', 1: 'C', 2: 'G', 3: 'T'}
+    decoded_chars = []
+
+    for val in encoded_sequence:
+        if not (0 <= val <= 63):
+            raise ValueError("Encoded trimer integers must be between 0 and 63.")
+
+        # Extract the three nucleotides from right to left
+        base3 = BITS_TO_BASE[val & 3]          # Get lowest 2 bits
+        base2 = BITS_TO_BASE[(val >> 2) & 3]   # Shift 2 bits, get next 2 bits
+        base1 = BITS_TO_BASE[(val >> 4) & 3]   # Shift 4 bits, get highest 2 bits
+
+        decoded_chars.extend([base1, base2, base3])
+
+    return "".join(decoded_chars)
+
+
 class LabelledDataset(Dataset):
-    def __init__(self, directory: str):
+    def __init__(self, directory: str, formatting: str = None, bpe_path: str = None):
         assert directory.endswith('/')
         self.x = np.load(directory + "x.npy")
         self.y = np.load(directory + "y.npy")
+        self.formatting = formatting
+        if bpe_path:
+            self.tokenizer = Tokenizer.from_file(bpe_path)
 
     def __len__(self):
         return len(self.x)
 
     def __getitem__(self, idx):
         x = self.x[idx]
+        if self.formatting == "1mer":
+            pass
+        elif self.formatting == "bpe":
+            x = decode_trimer(x)
+            x = self.tokenizer.encode(x)
         y = self.y[idx]
         return tensor(x), tensor(y)
 
@@ -459,10 +519,10 @@ class PretrainingDataset(Dataset):
         return tensor(x)
 
 
-def load_training_data(train, test, validate, batch_size):
-    train_data = DataLoader(LabelledDataset(train), batch_size=batch_size, shuffle=True)
-    test_data = DataLoader(LabelledDataset(test), batch_size=batch_size, shuffle=True)
-    validate_data = DataLoader(LabelledDataset(validate), batch_size=batch_size, shuffle=True)
+def load_training_data(train, test, validate, batch_size, formatting: str = None, bpe_path: str = None):
+    train_data = DataLoader(LabelledDataset(train, formatting, bpe_path), batch_size=batch_size, shuffle=True)
+    test_data = DataLoader(LabelledDataset(test, formatting, bpe_path), batch_size=batch_size, shuffle=True)
+    validate_data = DataLoader(LabelledDataset(validate, formatting, bpe_path), batch_size=batch_size, shuffle=True)
     log(f"Number of training batches: {len(train_data)}")
     log(f"Number of test batches: {len(test_data)}")
     log(f"Number of validation batches: {len(validate_data)}")
@@ -665,6 +725,18 @@ if __name__ == "__main__":
         default=None,
         help="Optional epoch from which to lead weights (default: None)"
     )
+    parser.add_argument(
+        "--format",
+        type=str,
+        default=None,
+        help="Optional format. Default: 3mer. Options: bpe"
+    )
+    parser.add_argument(
+        "--bpe_path",
+        type=str,
+        default=None,
+        help="Optional filepath to the BPE token file, if using BPE tokenization."
+    )
     args = parser.parse_args()
     assert args.directory.endswith("/"), "`directory` must be a directory."
 
@@ -684,6 +756,8 @@ if __name__ == "__main__":
         model = Mamba2Classifier(n_classes)
     elif args.model.lower() == "mamba-attention":
         model = MambaClassifierAttention(n_classes)
+    elif args.model.lower() == "mamba-bpe":
+        model = MambaClassifierBPE(n_classes)
 
     model = model.to(args.device)
     if args.start_weight_epoch:
@@ -700,7 +774,7 @@ if __name__ == "__main__":
         save(model.state_dict(), f"{args.directory}weights_pretraining_epoch.pt2")
 
     log("Load training data.")
-    train_data, test_data, validate_data = load_training_data(args.train, args.test, args.validate, args.batch_size)
+    train_data, test_data, validate_data = load_training_data(args.train, args.test, args.validate, args.batch_size, args.format, args.bpe_path)
     if args.n_epochs > 0:
         log("Train the model.")
         train(model, args.directory, args.n_epochs, train_data, validate_data, args.n_classes, args.device, start_epoch)
