@@ -21,6 +21,7 @@
 import argparse
 from datetime import datetime, timezone
 from time import time
+import json
 import numpy as np
 from sklearn.metrics import f1_score, precision_score
 from torch.utils.data import Dataset, DataLoader
@@ -94,6 +95,56 @@ class BERTax(Module):
             return logits
 
 
+class BERTax_12(Module):
+    def __init__(
+            self,
+            N: int,
+            num_classes: int,
+            embed_dim: int = 250,
+            vocab_size: int = 64,
+            n_head: int = 5,
+            dropout: float = 0.05,
+            n_layers: int = 12,
+            ):
+        super(BERTax_12, self).__init__()
+        self.embed_dim = embed_dim
+        self.token_embedding = Embedding(vocab_size + 1, embed_dim)
+        self.emb_layer_norm = LayerNorm(embed_dim)
+        self.dropout = Dropout(dropout)
+        encoder_layer = TransformerEncoderLayer(
+            d_model=embed_dim,
+            nhead=n_head,
+            dim_feedforward=embed_dim * 4,
+            dropout=dropout,
+            activation='relu',
+            batch_first=True,  # makes input/output shape [B, L, D]
+            norm_first=True
+        )
+        self.transformer_encoder = TransformerEncoder(encoder_layer, num_layers=n_layers)
+        self.mlm_head = Linear(embed_dim, vocab_size + 1)
+        self.classifier = Linear(embed_dim, num_classes)
+        self.cls_token = Parameter(randn(1, 1, embed_dim))
+        self.position_embedding = Embedding(N + 1, embed_dim)
+
+    def forward(self, x, mlm=None):
+        batch_size, seq_len = x.size()
+        token_embeddings = self.token_embedding(x) * sqrt(self.embed_dim)
+        cls_tokens = self.cls_token.repeat(batch_size, 1, 1) * sqrt(self.embed_dim)
+        x = cat([cls_tokens, token_embeddings], dim=1)  # Shape: [B, L + 1, D]
+        positions = arange(0, seq_len + 1, device=x.device).unsqueeze(0).expand(batch_size, -1)
+        x = x + self.position_embedding(positions)
+        x = self.dropout(self.emb_layer_norm(x))
+        h = self.transformer_encoder(x)  # [B, L+1, D]
+        if mlm is not None:
+            h = h[:, 1:, :]
+            logits = self.mlm_head(h)  # [B, L, vocab_size + 1]
+            return logits
+        else:
+            h = h[:, 0, :]  # [B, D]
+            logits = self.classifier(h)  # [B, num_classes]
+            return logits
+
+
 class MambaBlock(Module):
     def __init__(self, d_model, d_state, d_conv, expand):
         super().__init__()
@@ -109,7 +160,41 @@ class MambaBlock(Module):
         return x + self.mamba(self.norm(x))
 
 
-class MambaClassifier(Module):
+class MambaClassifier_3(Module):
+    def __init__(
+        self,
+        num_classes: int,
+        vocab_size: int = 64,
+        d_model: int = 250,
+        n_layers: int = 3,
+        d_state: int = 16,
+        d_conv: int = 4,
+        expand: int = 2,
+        dropout: float = 0.05,
+    ):
+        super(MambaClassifier_3, self).__init__()
+        self.embedding = Embedding(vocab_size + 1, d_model)
+        self.layers = ModuleList([
+            MambaBlock(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
+            for _ in range(n_layers)
+        ])
+        self.norm = LayerNorm(d_model)
+        self.dropout = Dropout(dropout) if dropout > 0 else Identity()
+        self.classifier = Linear(d_model, num_classes)
+        self.mlm_head = Linear(d_model, vocab_size + 1)
+
+    def forward(self, x) -> Tensor:
+        h = self.embedding(x)
+        for block in self.layers:
+            h = block(h)   # each Mamba block returns [B, L, d_model]
+        h = self.norm(h)
+        pooled = h.mean(dim=1)  # [B, d_model]
+        pooled = self.dropout(pooled)
+        logits = self.classifier(pooled)  # [B, num_classes]
+        return logits
+
+
+class MambaClassifier_6(Module):
     def __init__(
         self,
         num_classes: int,
@@ -121,7 +206,7 @@ class MambaClassifier(Module):
         expand: int = 2,
         dropout: float = 0.05,
     ):
-        super(MambaClassifier, self).__init__()
+        super(MambaClassifier_6, self).__init__()
         self.embedding = Embedding(vocab_size + 1, d_model)
         self.layers = ModuleList([
             MambaBlock(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
@@ -212,57 +297,7 @@ class MambaClassifierAttention(Module):
         return logits
 
 
-class Mamba2Block(Module):
-    def __init__(self, d_model, d_state, d_conv, expand):
-        super().__init__()
-        self.norm = LayerNorm(d_model)
-        self.mamba = Mamba2(
-            d_model=d_model,
-            d_state=d_state,
-            d_conv=d_conv,
-            expand=expand,
-            headdim=64
-        )
-
-    def forward(self, x):
-        return x + self.mamba(self.norm(x))
-
-
-class Mamba2Classifier(Module):
-    def __init__(
-        self,
-        num_classes: int,
-        vocab_size: int = 64,
-        d_model: int = 256,
-        n_layers: int = 6,
-        d_state: int = 16,
-        d_conv: int = 4,
-        expand: int = 2,
-        dropout: float = 0.05,
-    ):
-        super(Mamba2Classifier, self).__init__()
-        self.embedding = Embedding(vocab_size + 1, d_model)
-        self.layers = ModuleList([
-            Mamba2Block(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
-            for _ in range(n_layers)
-        ])
-        self.norm = LayerNorm(d_model)
-        self.dropout = Dropout(dropout) if dropout > 0 else Identity()
-        self.classifier = Linear(d_model, num_classes)
-        self.mlm_head = Linear(d_model, vocab_size + 1)
-
-    def forward(self, x) -> Tensor:
-        h = self.embedding(x)
-        for block in self.layers:
-            h = block(h)   # each Mamba block returns [B, L, d_model]
-        h = self.norm(h)
-        pooled = h.mean(dim=1)  # [B, d_model]
-        pooled = self.dropout(pooled)
-        logits = self.classifier(pooled)  # [B, num_classes]
-        return logits
-
-
-class MambaClassifierLarge(Module):
+class MambaClassifier_12(Module):
     def __init__(
         self,
         num_classes: int,
@@ -274,7 +309,7 @@ class MambaClassifierLarge(Module):
         expand: int = 2,
         dropout: float = 0.05,
     ):
-        super(MambaClassifierLarge, self).__init__()
+        super(MambaClassifier_12, self).__init__()
         self.embedding = Embedding(vocab_size + 1, d_model)
         self.layers = ModuleList([
             MambaBlock(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
@@ -295,174 +330,67 @@ class MambaClassifierLarge(Module):
         return logits
 
 
-class DownsamplingCNN(Module):
-    """Converts [B, 4, L] into [B, L_reduced, d_model]."""
-    def __init__(
-        self,
-        in_channels=4,
-        d_model=250,
-        n_layers=2,
-        kernel_size=9,
-        downsample_factor=4,
-    ):
+class HierarchicalTaxonomicLoss(Module):
+    def __init__(self, json_path_or_dict, device, level_weights=None):
         super().__init__()
-        layers = []
-        c = in_channels
-        current_factor = 1
-        for i in range(n_layers):
-            stride = 2 if current_factor < downsample_factor else 1
-            current_factor *= stride
-            if type(kernel_size) is int:
-                layers += [
-                    Conv1d(c, d_model, kernel_size,
-                           stride=stride, padding=kernel_size // 2),
-                    ReLU(),
-                    BatchNorm1d(d_model)
-                ]
-            else:
-                layers += [
-                    Conv1d(c, d_model, kernel_size[i],
-                           stride=stride, padding=kernel_size[i] // 2),
-                    ReLU(),
-                    BatchNorm1d(d_model)
-                ]
-            c = d_model
-        self.net = Sequential(*layers)
+        self.eps = 1e-8
 
-    def forward(self, x):
-        h = self.net(x)  # [B, d_model, L_reduced]
-        return h.transpose(1, 2)  # [B, L_reduced, d_model]
+        if isinstance(json_path_or_dict, str):
+            with open(json_path_or_dict, 'r') as f:
+                mapping = json.load(f)
+        else:
+            mapping = json_path_or_dict
 
+        num_leaf_classes = max(int(k) for k in mapping.keys()) + 1
+        num_levels = len(next(iter(mapping.values())))
 
-class MambaClassifierCNN(Module):
-    def __init__(
-        self,
-        num_classes: int,
-        d_model: int = 100,
-        n_layers: int = 6,
-        d_state: int = 16,
-        d_conv: int = 4,
-        expand: int = 2,
-        dropout: float = 0.05,
-    ):
-        super(MambaClassifierCNN, self).__init__()
-        self.embedding = DownsamplingCNN(d_model=d_model, kernel_size=9)
-        self.layers = ModuleList([
-            MambaBlock(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
-            for _ in range(n_layers)
-        ])
-        self.norm = LayerNorm(d_model)
-        self.dropout = Dropout(dropout) if dropout > 0 else Identity()
-        self.classifier = Linear(d_model, num_classes)
+        str_to_int_maps = [{} for _ in range(num_levels)]
+        for leaf_str, taxonomy_list in mapping.items():
+            for lvl, taxon in enumerate(taxonomy_list):
+                if taxon not in str_to_int_maps[lvl]:
+                    str_to_int_maps[lvl][taxon] = len(str_to_int_maps[lvl])
 
-    def forward(self, x) -> Tensor:
-        batch_size, _ = x.size()
-        n1 = x // 16
-        n2 = (x // 4) % 4
-        n3 = x % 4
-        nucleotides = torch.stack([n1, n2, n3], dim=2).view(batch_size, -1)
-        one_hot = F.one_hot(nucleotides, num_classes=4).float()
-        x_onehot = one_hot.transpose(1, 2)  # [B, 4, 3 * L]
-        h = self.embedding(x_onehot)
-        for block in self.layers:
-            h = block(h)   # each Mamba block returns [B, L, d_model]
-        h = self.norm(h)
-        pooled = h.mean(dim=1)  # [B, d_model]
-        pooled = self.dropout(pooled)
-        logits = self.classifier(pooled)  # [B, num_classes]
-        return logits
+        self.P_matrices = []
+        for lvl in range(num_levels - 1):
+            num_parent_classes = len(str_to_int_maps[lvl])
+            P = torch.zeros((num_parent_classes, num_leaf_classes), dtype=torch.float32).to(device)
 
+            for leaf_str, taxonomy_list in mapping.items():
+                leaf_idx = int(leaf_str)
+                parent_taxon = taxonomy_list[lvl]
+                parent_idx = str_to_int_maps[lvl][parent_taxon]
+                P[parent_idx, leaf_idx] = 1.0
 
-class AdjustableMambaBlock(Module):
-    def __init__(self, d_model, d_state, d_conv, expand, m, M):
-        super().__init__()
-        self.norm = LayerNorm(d_model)
-        self.mamba = Mamba(
-            d_model=d_model,
-            d_state=d_state,
-            d_conv=d_conv,
-            expand=expand,
-            dt_min = m,
-            dt_max=M,
-        )
+            self.register_buffer(f"P_matrix_lvl_{lvl}", P)
+            self.P_matrices.append(f"P_matrix_lvl_{lvl}")
 
-    def forward(self, x):
-        return x + self.mamba(self.norm(x))
+        level_targets_matrix = torch.zeros((num_leaf_classes, num_levels), dtype=torch.long).to(device)
+        for leaf_str, taxonomy_list in mapping.items():
+            leaf_idx = int(leaf_str)
+            for lvl, taxon in enumerate(taxonomy_list):
+                level_targets_matrix[leaf_idx, lvl] = str_to_int_maps[lvl][taxon]
 
+        self.register_buffer("level_targets_matrix", level_targets_matrix)
 
-class DualTimescaleMamba(Module):
-    def __init__(self, d_model, d_state, fast_dt=(0.00001, 0.01), slow_dt=(0.001, 0.2)):
-        super().__init__()
-        self.in_proj = Linear(d_model, d_model * 2)
-        self.ssm_fast = AdjustableMambaBlock(
-            d_model=d_model,
-            d_state=d_state,
-            d_conv=4,
-            expand=2,
-            m=fast_dt[0],
-            M=fast_dt[1],
-        )
-        self.ssm_slow = AdjustableMambaBlock(
-            d_model=d_model,
-            d_state=d_state,
-            d_conv=4,
-            expand=2,
-            m=slow_dt[0],
-            M=slow_dt[1],
-        )
-        self.gate = Linear(d_model, d_model)
-        self.out_proj = Linear(d_model, d_model)
+        self.level_weights = level_weights if level_weights else [0.2, 0.3, 0.5]
 
-    def forward(self, x):
-        u, v = self.in_proj(x).chunk(2, dim=-1)
-        y_fast = self.ssm_fast(u)
-        y_slow = self.ssm_slow(u)
-        g = torch.sigmoid(self.gate(v))
-        y = g * y_fast + (1 - g) * y_slow
-        return self.out_proj(y)
+    def forward(self, logits, leaf_targets):
+        leaf_probs = F.softmax(logits, dim=-1)
+        total_loss = 0.0
+        batch_level_targets = self.level_targets_matrix[leaf_targets]
+        for lvl, p_attr in enumerate(self.P_matrices):
+            P = getattr(self, p_attr)
+            parent_probs = torch.matmul(leaf_probs, P.T)
+            targets_lvl = batch_level_targets[:, lvl]
+            correct_parent_probs = parent_probs.gather(1, targets_lvl.unsqueeze(1)).squeeze(1)
+            lvl_loss = -torch.log(correct_parent_probs + self.eps).mean()
 
+            total_loss += self.level_weights[lvl] * lvl_loss
 
-class MambaClassifierDual(Module):
-    def __init__(
-        self,
-        num_classes: int,
-        vocab_size: int = 64,
-        d_model: int = 250,
-        n_layers: int = 6,
-        d_state: int = 16,
-        d_conv: int = 4,
-        expand: int = 2,
-        dropout: float = 0.05,
-        fast_dt=(0.00001, 0.01),
-        slow_dt=(0.001, 0.2),
-    ):
-        super().__init__()
-        self.embedding = Embedding(vocab_size + 1, d_model)
-        self.layers = ModuleList([
-            DualTimescaleMamba(d_model=d_model, d_state=d_state, fast_dt=fast_dt, slow_dt=slow_dt)
-        ])
-        for _ in range(n_layers - 2):
-            self.layers.append(
-                MambaBlock(
-                    d_model=d_model,
-                    d_state=d_state,
-                    d_conv=d_conv,
-                    expand=expand,
-                )
-            )
-        self.norm = LayerNorm(d_model)
-        self.dropout = Dropout(dropout) if dropout > 0 else Identity()
-        self.classifier = Linear(d_model, num_classes)
+        genus_loss = F.cross_entropy(logits, leaf_targets)
+        total_loss += self.level_weights[-1] * genus_loss
 
-    def forward(self, x: torch.LongTensor) -> torch.Tensor:
-        h = self.embedding(x)
-        for block in self.layers:
-            h = block(h)   # each Mamba block returns [B, L, d_model]
-        h = self.norm(h)
-        pooled = h.mean(dim=1)  # [B, d_model]
-        pooled = self.dropout(pooled)
-        logits = self.classifier(pooled)  # [B, num_classes]
-        return logits
+        return total_loss
 
 
 # Training ####################################################################
@@ -492,18 +420,30 @@ class LabelledDataset(Dataset):
         self.formatting = formatting
         if bpe_path:
             self.tokenizer = Tokenizer.from_file(bpe_path)
+            self.pad_id = self.tokenizer.token_to_id("[PAD]")
+            self.tokenizer.enable_truncation(max_length=500)
+            self.tokenizer.enable_padding(
+                direction="right",
+                pad_id=self.pad_id,
+                pad_token="[PAD]",
+                length=500
+            )
 
     def __len__(self):
         return len(self.x)
 
     def __getitem__(self, idx):
         x = self.x[idx]
+        y = self.y[idx]
         if self.formatting == "1mer":
-            pass
+            x = decode_trimer(x)
+            x =
+            # TODO
         elif self.formatting == "bpe":
             x = decode_trimer(x)
             x = self.tokenizer.encode(x)
-        y = self.y[idx]
+            x = tensor(x.ids, dtype=torch.long)
+            return x, tensor(y)
         return tensor(x), tensor(y)
 
 
@@ -547,6 +487,8 @@ def pretrain(classifier, pretrain_filepath, batch_size, device):
         a = time()
         x = x.to(device).long()
         targets = x.clone()
+
+        # TODO: causal and MLM maskings
 
         # 1. Generate Mask Matrix (15%)
         probability_matrix = full(x.shape, 0.15, device=device)
@@ -629,13 +571,16 @@ def train_for_one_epoch(model, train_data, optimizer, loss_function, device):
 
 
 def train(
-        model, directory: str, n_epochs: int, train_data, validation_data, n_classes, device, start_epoch
+        model, directory: str, n_epochs: int, train_data, validation_data, n_classes, device, start_epoch, hierarchy_file
     ) -> None:
     parameters = model.parameters()
     total_params = sum(param.numel() for param in parameters)
     log(f"Number of parameters: {total_params:_}")
     optimizer = Adam(model.parameters(), lr=0.001)
-    loss_function = CrossEntropyLoss()
+    if hierarchy_file:
+        loss_function = HierarchicalTaxonomicLoss(hierarchy_file, device)
+    else:
+        loss_function = CrossEntropyLoss()
     for epoch in range(n_epochs):
         actual_epoch = start_epoch + epoch
         log(f"Epoch {actual_epoch + 1}")
@@ -649,6 +594,110 @@ def train(
 
 
 # Evaluation ##################################################################
+def obtain_rank_based_mappings(mapping: dict) -> list[dict]:
+    """Convert the flat-level indices to higher taxonomic rank indices."""
+    keys = []
+    mappings = []
+    for i in range(len(mapping['0']) - 1, -1, -1):
+        keys.append(set())
+        mappings.append({})
+        for j, labels in mapping.items():
+            if labels in (["unknown", ], ("unknown", ), "other"):
+                label = "unknown"
+                assert label not in keys, "Unexpected unknown taxon."
+                keys[-1].add(label)
+                mappings[-1][int(j)] = len(keys[-1]) - 1
+            else:
+                label = labels[i]
+                if label not in keys[-1]:
+                    keys[-1].add(label)
+                mappings[-1][int(j)] = len(keys[-1]) - 1
+        if i == len(mapping['0']) - 1:
+            assert len(keys[-1]) == len(mapping), "Duplicate names."
+    return mappings
+
+
+def rank_based_precision(
+        json_mapping: str,
+        target: list[int],
+        predictions: list[int],
+        average: str="macro",
+        exclude_other: bool = True
+        ) -> list[np.ndarray]:
+    """Evaluate precision at multiple taxonomic ranks."""
+    p = []
+    with open(json_mapping, "r") as f:
+        mapp = json.load(f)
+    mappings = obtain_rank_based_mappings(mapp)
+    for mapping in mappings:
+        labels = list(set(mapping.values()))
+        normalized_target = [mapping[int(v)] for v in list(target)]
+        normalized_pred = [mapping[int(v)] for v in list(predictions)]
+        if exclude_other:
+            labels = labels[:-1]
+        p.append(
+            precision_score(
+                normalized_target,
+                normalized_pred,
+                average=average,
+                labels=labels,
+                zero_division=0.0
+            )
+        )
+    return p
+
+
+def validate_rank(model, json_mapping, validation_data, n_classes, device, loss_function=None):
+    model.eval()
+    n = 0
+    validation_loss = 0
+    real_y, predicted_y = [], []
+    i = 0
+    total_steps = len(validation_data)
+    with no_grad():
+        for x_batch, y_batch in validation_data:
+            start = time()
+            n += len(y_batch)
+            x_batch = x_batch.to(device).long()
+            y_batch = y_batch.to(device).long()
+            output = model(x_batch)
+            if loss_function:
+                loss = loss_function(output, y_batch)
+                validation_loss += loss.item()
+            predictions = argmax(output, dim=1)
+            predicted_y += predictions.cpu()
+            real_y += y_batch.cpu()
+            end = time()
+            # Tracking
+            if i == 50:  # Wait until duration stabilizes.
+                duration = end - start
+                total = duration * total_steps
+                log(f"Step duration: {duration:.3} s. Estimated total duration: {int(total):_} s.")
+            elif i and i % 1000 == 0:
+                log(f"Evaluation step {i}.")
+            i += 1
+    if loss_function:
+        validation_loss /= n
+        log(f"Average loss: {validation_loss:.5}")
+    f1 = f1_score(
+        real_y,
+        predicted_y,
+        average="macro",
+        labels=range(n_classes),
+        zero_division=0.0
+    )
+    log(f"F1 score: {f1:.5}")
+    precision = precision_score(
+        real_y,
+        predicted_y,
+        average="macro",
+        labels=range(n_classes),
+        zero_division=0.0
+    )
+    log(f"Precision: {precision:.5}")
+    p = rank_based_precision(json_mapping, real_y, predicted_y)
+    log(f"Rank precision: {p}")
+
 def validate(model, validation_data, n_classes, device, loss_function=None):
     model.eval()
     n = 0
@@ -720,8 +769,14 @@ if __name__ == "__main__":
         help="Optional filepath to pretraining weights/data (default: None)"
     )
     parser.add_argument(
-        "--start_weight_epoch",
+        "--n_pretraining",
         type=int,
+        default=1,
+        help="Optional number of pretaining epochs (default: 1)"
+    )
+    parser.add_argument(
+        "--start_weight_epoch",
+        type=str,
         default=None,
         help="Optional epoch from which to lead weights (default: None)"
     )
@@ -737,23 +792,27 @@ if __name__ == "__main__":
         default=None,
         help="Optional filepath to the BPE token file, if using BPE tokenization."
     )
+    parser.add_argument(
+        "--hierarchy",
+        type=str,
+        default=None,
+        help="Optional filepath to the taxonomic classification file."
+    )
     args = parser.parse_args()
     assert args.directory.endswith("/"), "`directory` must be a directory."
 
-    log(f"Creating the model.")
+    log("Creating the model.")
     n_classes = int(args.n_classes)
     if args.model.lower() == "bertax":
         model = BERTax(500, n_classes)
-    elif args.model.lower() == "mamba":
-        model = MambaClassifier(n_classes)
-    elif args.model.lower() == "mamba-cnn":
-        model = MambaClassifierCNN(n_classes)
-    elif args.model.lower() == "mamba-dual":
-        model = MambaClassifierDual(n_classes)
-    elif args.model.lower() == "mamba-large":
-        model = MambaClassifierLarge(n_classes)
-    elif args.model.lower() == "mamba-2":
-        model = Mamba2Classifier(n_classes)
+    elif args.model.lower() == "bertax_12":
+        model = BERTax_12(500, n_classes)
+    elif args.model.lower() == "mamba-3":
+        model = MambaClassifier_3(n_classes)
+    elif args.model.lower() == "mamba-6":
+        model = MambaClassifier_6(n_classes)
+    elif args.model.lower() == "mamba-12":
+        model = MambaClassifier_12(n_classes)
     elif args.model.lower() == "mamba-attention":
         model = MambaClassifierAttention(n_classes)
     elif args.model.lower() == "mamba-bpe":
@@ -769,15 +828,30 @@ if __name__ == "__main__":
 
     if args.pretraining:
         log("Pretrain the model.")
-        pretrain(model, args.pretraining, args.batch_size, args.device)
-        log(f"Saving the model at the end of pretraining.")
-        save(model.state_dict(), f"{args.directory}weights_pretraining_epoch.pt2")
+        for n in range(args.n_pretaining):
+            pretrain(model, args.pretraining, args.batch_size, args.device)
+            log("Saving the model at the end of pretraining.")
+            save(model.state_dict(), f"{args.directory}weights_pretraining_{n+1}.pt2")
+
+    try:
+        n = int(args.n_epochs)
+    except:
+        n = 0
+
+    try:
+        start_epoch = int(start_epoch)
+    except:
+        start_epoch = 0
 
     log("Load training data.")
     train_data, test_data, validate_data = load_training_data(args.train, args.test, args.validate, args.batch_size, args.format, args.bpe_path)
     if args.n_epochs > 0:
         log("Train the model.")
-        train(model, args.directory, args.n_epochs, train_data, validate_data, args.n_classes, args.device, start_epoch)
+        train(model, args.directory, n, train_data, validate_data, args.n_classes, args.device, start_epoch, args.hierarchy)
+
+    if args.hierarchy:
+        log("Hierarchical evaluation.")
+        validate_rank(model, args.hierarchy, test_data, args.n_classes, args.device)
 
     log("Test the trained model.")
     validate(model, test_data, args.n_classes, args.device)
