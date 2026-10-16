@@ -28,8 +28,7 @@ from torch.utils.data import Dataset, DataLoader
 from torch.optim import Adam
 from torch.nn import (CrossEntropyLoss, Module, Embedding, Linear, Parameter,
                       TransformerEncoderLayer, TransformerEncoder,
-                      LayerNorm, ModuleList, Dropout, Identity, BatchNorm1d,
-                      Conv1d, ReLU, Sequential)
+                      LayerNorm, ModuleList, Dropout, Identity)
 from torch import (argmax, save, load, tensor, no_grad, arange, cat, randn,
                    Tensor, full, bernoulli, randint)
 import torch
@@ -50,8 +49,8 @@ class BERTax(Module):
             self,
             N: int,
             num_classes: int,
+            vocab_size: int,
             embed_dim: int = 250,
-            vocab_size: int = 64,
             n_head: int = 5,
             dropout: float = 0.05,
             n_layers: int = 6,
@@ -100,8 +99,8 @@ class BERTax_12(Module):
             self,
             N: int,
             num_classes: int,
+            vocab_size: int,
             embed_dim: int = 250,
-            vocab_size: int = 64,
             n_head: int = 5,
             dropout: float = 0.05,
             n_layers: int = 12,
@@ -164,7 +163,7 @@ class MambaClassifier_3(Module):
     def __init__(
         self,
         num_classes: int,
-        vocab_size: int = 64,
+        vocab_size: int,
         d_model: int = 250,
         n_layers: int = 3,
         d_state: int = 16,
@@ -198,7 +197,7 @@ class MambaClassifier_6(Module):
     def __init__(
         self,
         num_classes: int,
-        vocab_size: int = 64,
+        vocab_size: int,
         d_model: int = 250,
         n_layers: int = 6,
         d_state: int = 16,
@@ -265,7 +264,7 @@ class MambaClassifierAttention(Module):
     def __init__(
         self,
         num_classes: int,
-        vocab_size: int = 64,
+        vocab_size: int ,
         d_model: int = 250,
         n_layers: int = 6,
         d_state: int = 16,
@@ -301,7 +300,7 @@ class MambaClassifier_12(Module):
     def __init__(
         self,
         num_classes: int,
-        vocab_size: int = 64,
+        vocab_size: int,
         d_model: int = 250,
         n_layers: int = 12,
         d_state: int = 16,
@@ -397,19 +396,48 @@ class HierarchicalTaxonomicLoss(Module):
 def decode_trimer(encoded_sequence: list[int]) -> str:
     BITS_TO_BASE = {0: 'A', 1: 'C', 2: 'G', 3: 'T'}
     decoded_chars = []
-
     for val in encoded_sequence:
         if not (0 <= val <= 63):
             raise ValueError("Encoded trimer integers must be between 0 and 63.")
-
         # Extract the three nucleotides from right to left
         base3 = BITS_TO_BASE[val & 3]          # Get lowest 2 bits
         base2 = BITS_TO_BASE[(val >> 2) & 3]   # Shift 2 bits, get next 2 bits
         base1 = BITS_TO_BASE[(val >> 4) & 3]   # Shift 4 bits, get highest 2 bits
-
         decoded_chars.extend([base1, base2, base3])
-
     return "".join(decoded_chars)
+
+
+BASE_TO_BITS = {
+    'A': 0b00,
+    'C': 0b01,
+    'G': 0b10,
+    'T': 0b11,
+}
+def encode_sequence(sequence):
+    result = 0
+    for base in sequence:
+        result = (result << 2) | BASE_TO_BITS[base]
+    return result
+
+
+def encode_1mer(sequence: str) -> list[int]:
+    if any(base not in 'ACGT' for base in sequence):
+        raise ValueError("Input must be a 4-character string containing only A, C, G, T.")
+    return [BASE_TO_BITS[t] for t in sequence]
+
+
+def encode_2mer(sequence: str) -> list[int]:
+    if any(base not in 'ACGT' for base in sequence):
+        raise ValueError("Input must be a 4-character string containing only A, C, G, T.")
+    pairs = [sequence[i:i+2] for i in range(0, len(sequence), 2)]
+    return [encode_sequence(t) for t in pairs]
+
+
+def encode_tetramer(sequence: str) -> list[int]:
+    if any(base not in 'ACGT' for base in sequence):
+        raise ValueError("Input must be a 4-character string containing only A, C, G, T.")
+    tetramers = [sequence[i:i+4] for i in range(0, len(sequence), 4)]
+    return [encode_sequence(t) for t in tetramers]
 
 
 class LabelledDataset(Dataset):
@@ -437,14 +465,23 @@ class LabelledDataset(Dataset):
         y = self.y[idx]
         if self.formatting == "1mer":
             x = decode_trimer(x)
-            x =
-            # TODO
+            x = encode_1mer(x)
+            x = tensor(x)
+        elif self.formatting == "2mer":
+            x = decode_trimer(x)
+            x = encode_2mer(x)
+            x = tensor(x)
+        elif self.formatting == "3mer":
+            pass
+        elif self.formatting == "4mer":
+            x = decode_trimer(x)
+            x = encode_tetramer(x)
+            x = tensor(x)
         elif self.formatting == "bpe":
             x = decode_trimer(x)
             x = self.tokenizer.encode(x)
             x = tensor(x.ids, dtype=torch.long)
-            return x, tensor(y)
-        return tensor(x), tensor(y)
+        return x, tensor(y)
 
 
 class PretrainingDataset(Dataset):
@@ -469,7 +506,7 @@ def load_training_data(train, test, validate, batch_size, formatting: str = None
     return train_data, test_data, validate_data
 
 
-def pretrain(classifier, pretrain_filepath, batch_size, device):
+def pretrain(classifier, pretrain_filepath, batch_size, device, pretraining_type="mlm"):
     optimizer = Adam(model.parameters(), lr=0.001)
     dataloader = DataLoader(PretrainingDataset(pretrain_filepath), batch_size=batch_size, shuffle=True)
     total_steps = len(dataloader)
@@ -488,20 +525,27 @@ def pretrain(classifier, pretrain_filepath, batch_size, device):
         x = x.to(device).long()
         targets = x.clone()
 
-        # TODO: causal and MLM maskings
+        if pretraining_type == "causal":
+            # Causal masking: mask the last 15% of tokens
+            masked_indices = torch.zeros(x.shape, dtype=torch.bool, device=device)
+            seq_len = x.shape[1]
+            n_last = int(seq_len * 0.15)
+            masked_indices[:, -n_last:] = True
+            targets[~masked_indices] = -100
+            x[masked_indices] = mask_token_id
+        else:
+            # 1. Generate Mask Matrix (15%)
+            probability_matrix = full(x.shape, 0.15, device=device)
+            masked_indices = bernoulli(probability_matrix).bool()
+            targets[~masked_indices] = -100
 
-        # 1. Generate Mask Matrix (15%)
-        probability_matrix = full(x.shape, 0.15, device=device)
-        masked_indices = bernoulli(probability_matrix).bool()
-        targets[~masked_indices] = -100
+            # 2. Apply 80/10/10 Rule
+            indices_replaced = bernoulli(full(x.shape, 0.8, device=device)).bool() & masked_indices
+            x[indices_replaced] = mask_token_id
 
-        # 2. Apply 80/10/10 Rule
-        indices_replaced = bernoulli(full(x.shape, 0.8, device=device)).bool() & masked_indices
-        x[indices_replaced] = mask_token_id
-
-        indices_random = bernoulli(full(x.shape, 0.5, device=device)).bool() & masked_indices & ~indices_replaced
-        random_tokens = randint(0, vocab_size, x.shape, device=device)
-        x[indices_random] = random_tokens[indices_random]
+            indices_random = bernoulli(full(x.shape, 0.5, device=device)).bool() & masked_indices & ~indices_replaced
+            random_tokens = randint(0, vocab_size, x.shape, device=device)
+            x[indices_random] = random_tokens[indices_random]
 
         # 3. Forward Pass
         optimizer.zero_grad()
@@ -758,7 +802,7 @@ if __name__ == "__main__":
     parser.add_argument("--validate", type=str, help="Filepath to validation set")
     parser.add_argument("--n_classes", type=int, help="Number of classes")
     parser.add_argument("--batch_size", type=int, help="Batch size")
-    parser.add_argument("--n_epochs", type=int, help="Maximum number of epochs")
+    parser.add_argument("--n_epochs", type=int, help="Maximum number of epochs", default=0)
     parser.add_argument("--directory", type=str, help="output directory (weights and results)")
     parser.add_argument("--device", type=str, help="Either `cpu` or `cuda`.")
     parser.add_argument("--model", type=str, help="Name of the model to train and test.")
@@ -767,6 +811,12 @@ if __name__ == "__main__":
         type=str,
         default=None,
         help="Optional filepath to pretraining weights/data (default: None)"
+    )
+    parser.add_argument(
+        "--pretraining_type",
+        type=str,
+        default="mlm",
+        help="Optional pretraining masking type: `mlm` or `causal` (default: mlm)"
     )
     parser.add_argument(
         "--n_pretraining",
@@ -801,20 +851,29 @@ if __name__ == "__main__":
     args = parser.parse_args()
     assert args.directory.endswith("/"), "`directory` must be a directory."
 
+    vocabulary_sizes = {
+        "1mer": 4,
+        "2mer": 16,
+        "3mer": 64,
+        "4mer": 256,
+        "bpe": None
+    }
+    v = vocabulary_sizes[args.format]
+
     log("Creating the model.")
     n_classes = int(args.n_classes)
-    if args.model.lower() == "bertax":
-        model = BERTax(500, n_classes)
-    elif args.model.lower() == "bertax_12":
-        model = BERTax_12(500, n_classes)
+    if args.model.lower() == "bertax-6":
+        model = BERTax(500, n_classes, vocab_size=v)
+    elif args.model.lower() == "bertax-12":
+        model = BERTax_12(500, n_classes, vocab_size=v)
     elif args.model.lower() == "mamba-3":
-        model = MambaClassifier_3(n_classes)
+        model = MambaClassifier_3(n_classes, vocab_size=v)
     elif args.model.lower() == "mamba-6":
-        model = MambaClassifier_6(n_classes)
+        model = MambaClassifier_6(n_classes, vocab_size=v)
     elif args.model.lower() == "mamba-12":
-        model = MambaClassifier_12(n_classes)
+        model = MambaClassifier_12(n_classes, vocab_size=v)
     elif args.model.lower() == "mamba-attention":
-        model = MambaClassifierAttention(n_classes)
+        model = MambaClassifierAttention(n_classes, vocab_size=v)
     elif args.model.lower() == "mamba-bpe":
         model = MambaClassifierBPE(n_classes)
 
@@ -829,7 +888,7 @@ if __name__ == "__main__":
     if args.pretraining:
         log("Pretrain the model.")
         for n in range(args.n_pretaining):
-            pretrain(model, args.pretraining, args.batch_size, args.device)
+            pretrain(model, args.pretraining, args.batch_size, args.device, args.pretraining_type)
             log("Saving the model at the end of pretraining.")
             save(model.state_dict(), f"{args.directory}weights_pretraining_{n+1}.pt2")
 
