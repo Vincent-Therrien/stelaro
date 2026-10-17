@@ -182,14 +182,17 @@ class MambaClassifier_3(Module):
         self.classifier = Linear(d_model, num_classes)
         self.mlm_head = Linear(d_model, vocab_size + 1)
 
-    def forward(self, x) -> Tensor:
+    def forward(self, x, mlm=None) -> Tensor:
         h = self.embedding(x)
         for block in self.layers:
             h = block(h)   # each Mamba block returns [B, L, d_model]
         h = self.norm(h)
         pooled = h.mean(dim=1)  # [B, d_model]
         pooled = self.dropout(pooled)
-        logits = self.classifier(pooled)  # [B, num_classes]
+        if mlm is not None:
+            logits = self.mlm_head(pooled)
+        else:
+            logits = self.classifier(pooled)  # [B, num_classes]
         return logits
 
 
@@ -216,14 +219,17 @@ class MambaClassifier_6(Module):
         self.classifier = Linear(d_model, num_classes)
         self.mlm_head = Linear(d_model, vocab_size + 1)
 
-    def forward(self, x) -> Tensor:
+    def forward(self, x, mlm=None) -> Tensor:
         h = self.embedding(x)
         for block in self.layers:
             h = block(h)   # each Mamba block returns [B, L, d_model]
         h = self.norm(h)
         pooled = h.mean(dim=1)  # [B, d_model]
         pooled = self.dropout(pooled)
-        logits = self.classifier(pooled)  # [B, num_classes]
+        if mlm is not None:
+            logits = self.mlm_head(pooled)
+        else:
+            logits = self.classifier(pooled)  # [B, num_classes]
         return logits
 
 
@@ -249,14 +255,17 @@ class MambaClassifierBPE(Module):
         self.dropout = Dropout(dropout) if dropout > 0 else Identity()
         self.classifier = Linear(d_model, num_classes)
 
-    def forward(self, x) -> Tensor:
+    def forward(self, x, mlm=None) -> Tensor:
         h = self.embedding(x)
         for block in self.layers:
             h = block(h)   # each Mamba block returns [B, L, d_model]
         h = self.norm(h)
         pooled = h.mean(dim=1)  # [B, d_model]
         pooled = self.dropout(pooled)
-        logits = self.classifier(pooled)  # [B, num_classes]
+        if mlm is not None:
+            logits = self.mlm_head(pooled)
+        else:
+            logits = self.classifier(pooled)  # [B, num_classes]
         return logits
 
 
@@ -443,9 +452,11 @@ def encode_tetramer(sequence: str) -> list[int]:
 class LabelledDataset(Dataset):
     def __init__(self, directory: str, formatting: str = None, bpe_path: str = None):
         assert directory.endswith('/')
-        self.x = np.load(directory + "x.npy")
-        self.y = np.load(directory + "y.npy")
+        x_raw = np.load(directory + "x.npy")
+        y_arr = np.load(directory + "y.npy")
         self.formatting = formatting
+        self.y = tensor(y_arr, dtype=torch.long)
+
         if bpe_path:
             self.tokenizer = Tokenizer.from_file(bpe_path)
             self.pad_id = self.tokenizer.token_to_id("[PAD]")
@@ -457,31 +468,33 @@ class LabelledDataset(Dataset):
                 length=500
             )
 
+        processed_x = []
+        for x in x_raw:
+            if formatting in ("3mer", None):
+                processed_x.append(x)
+            elif formatting == "1mer":
+                decoded = decode_trimer(x)
+                encoded = encode_1mer(decoded)
+                processed_x.append(encoded)
+            elif formatting == "2mer":
+                decoded = decode_trimer(x)
+                encoded = encode_2mer(decoded)
+                processed_x.append(encoded)
+            elif formatting == "4mer":
+                decoded = decode_trimer(x)
+                encoded = encode_tetramer(decoded)
+                processed_x.append(encoded)
+            elif formatting == "bpe":
+                decoded = decode_trimer(x)
+                encoded = self.tokenizer.encode(decoded).ids
+                processed_x.append(encoded)
+        self.x = tensor(np.array(processed_x), dtype=torch.long)
+
     def __len__(self):
-        return len(self.x)
+        return len(self.y)
 
     def __getitem__(self, idx):
-        x = self.x[idx]
-        y = self.y[idx]
-        if self.formatting == "1mer":
-            x = decode_trimer(x)
-            x = encode_1mer(x)
-            x = tensor(x)
-        elif self.formatting == "2mer":
-            x = decode_trimer(x)
-            x = encode_2mer(x)
-            x = tensor(x)
-        elif self.formatting == "3mer":
-            pass
-        elif self.formatting == "4mer":
-            x = decode_trimer(x)
-            x = encode_tetramer(x)
-            x = tensor(x)
-        elif self.formatting == "bpe":
-            x = decode_trimer(x)
-            x = self.tokenizer.encode(x)
-            x = tensor(x.ids, dtype=torch.long)
-        return x, tensor(y)
+        return self.x[idx], self.y[idx]
 
 
 class PretrainingDataset(Dataset):
@@ -822,7 +835,7 @@ if __name__ == "__main__":
         "--n_pretraining",
         type=int,
         default=1,
-        help="Optional number of pretaining epochs (default: 1)"
+        help="Optional number of pretraining epochs (default: 1)"
     )
     parser.add_argument(
         "--start_weight_epoch",
@@ -887,7 +900,7 @@ if __name__ == "__main__":
 
     if args.pretraining:
         log("Pretrain the model.")
-        for n in range(args.n_pretaining):
+        for n in range(args.n_pretraining):
             pretrain(model, args.pretraining, args.batch_size, args.device, args.pretraining_type)
             log("Saving the model at the end of pretraining.")
             save(model.state_dict(), f"{args.directory}weights_pretraining_{n+1}.pt2")
