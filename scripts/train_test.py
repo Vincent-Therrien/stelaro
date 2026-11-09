@@ -28,7 +28,8 @@ from torch.utils.data import Dataset, DataLoader
 from torch.optim import Adam
 from torch.nn import (CrossEntropyLoss, Module, Embedding, Linear, Parameter,
                       TransformerEncoderLayer, TransformerEncoder,
-                      LayerNorm, ModuleList, Dropout, Identity)
+                      LayerNorm, ModuleList, Dropout, Identity, BatchNorm1d,
+                      Conv1d, ReLU, Sequential)
 from torch import (argmax, save, load, tensor, no_grad, arange, cat, randn,
                    Tensor, full, bernoulli, randint)
 import torch
@@ -49,8 +50,8 @@ class BERTax(Module):
             self,
             N: int,
             num_classes: int,
-            vocab_size: int,
             embed_dim: int = 250,
+            vocab_size: int = 64,
             n_head: int = 5,
             dropout: float = 0.05,
             n_layers: int = 6,
@@ -99,8 +100,8 @@ class BERTax_12(Module):
             self,
             N: int,
             num_classes: int,
-            vocab_size: int,
             embed_dim: int = 250,
+            vocab_size: int = 64,
             n_head: int = 5,
             dropout: float = 0.05,
             n_layers: int = 12,
@@ -159,48 +160,11 @@ class MambaBlock(Module):
         return x + self.mamba(self.norm(x))
 
 
-class MambaClassifier_3(Module):
+class MambaClassifier(Module):
     def __init__(
         self,
         num_classes: int,
-        vocab_size: int,
-        d_model: int = 250,
-        n_layers: int = 3,
-        d_state: int = 16,
-        d_conv: int = 4,
-        expand: int = 2,
-        dropout: float = 0.05,
-    ):
-        super(MambaClassifier_3, self).__init__()
-        self.embedding = Embedding(vocab_size + 1, d_model)
-        self.layers = ModuleList([
-            MambaBlock(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
-            for _ in range(n_layers)
-        ])
-        self.norm = LayerNorm(d_model)
-        self.dropout = Dropout(dropout) if dropout > 0 else Identity()
-        self.classifier = Linear(d_model, num_classes)
-        self.mlm_head = Linear(d_model, vocab_size + 1)
-
-    def forward(self, x, mlm=None) -> Tensor:
-        h = self.embedding(x)
-        for block in self.layers:
-            h = block(h)   # each Mamba block returns [B, L, d_model]
-        h = self.norm(h)
-        pooled = h.mean(dim=1)  # [B, d_model]
-        pooled = self.dropout(pooled)
-        if mlm is not None:
-            logits = self.mlm_head(pooled)
-        else:
-            logits = self.classifier(pooled)  # [B, num_classes]
-        return logits
-
-
-class MambaClassifier_6(Module):
-    def __init__(
-        self,
-        num_classes: int,
-        vocab_size: int,
+        vocab_size: int = 64,
         d_model: int = 250,
         n_layers: int = 6,
         d_state: int = 16,
@@ -208,7 +172,7 @@ class MambaClassifier_6(Module):
         expand: int = 2,
         dropout: float = 0.05,
     ):
-        super(MambaClassifier_6, self).__init__()
+        super(MambaClassifier, self).__init__()
         self.embedding = Embedding(vocab_size + 1, d_model)
         self.layers = ModuleList([
             MambaBlock(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
@@ -219,17 +183,14 @@ class MambaClassifier_6(Module):
         self.classifier = Linear(d_model, num_classes)
         self.mlm_head = Linear(d_model, vocab_size + 1)
 
-    def forward(self, x, mlm=None) -> Tensor:
+    def forward(self, x) -> Tensor:
         h = self.embedding(x)
         for block in self.layers:
             h = block(h)   # each Mamba block returns [B, L, d_model]
         h = self.norm(h)
         pooled = h.mean(dim=1)  # [B, d_model]
         pooled = self.dropout(pooled)
-        if mlm is not None:
-            logits = self.mlm_head(pooled)
-        else:
-            logits = self.classifier(pooled)  # [B, num_classes]
+        logits = self.classifier(pooled)  # [B, num_classes]
         return logits
 
 
@@ -255,17 +216,14 @@ class MambaClassifierBPE(Module):
         self.dropout = Dropout(dropout) if dropout > 0 else Identity()
         self.classifier = Linear(d_model, num_classes)
 
-    def forward(self, x, mlm=None) -> Tensor:
+    def forward(self, x) -> Tensor:
         h = self.embedding(x)
         for block in self.layers:
             h = block(h)   # each Mamba block returns [B, L, d_model]
         h = self.norm(h)
         pooled = h.mean(dim=1)  # [B, d_model]
         pooled = self.dropout(pooled)
-        if mlm is not None:
-            logits = self.mlm_head(pooled)
-        else:
-            logits = self.classifier(pooled)  # [B, num_classes]
+        logits = self.classifier(pooled)  # [B, num_classes]
         return logits
 
 
@@ -273,7 +231,7 @@ class MambaClassifierAttention(Module):
     def __init__(
         self,
         num_classes: int,
-        vocab_size: int ,
+        vocab_size: int = 64,
         d_model: int = 250,
         n_layers: int = 6,
         d_state: int = 16,
@@ -305,11 +263,61 @@ class MambaClassifierAttention(Module):
         return logits
 
 
-class MambaClassifier_12(Module):
+class Mamba2Block(Module):
+    def __init__(self, d_model, d_state, d_conv, expand):
+        super().__init__()
+        self.norm = LayerNorm(d_model)
+        self.mamba = Mamba2(
+            d_model=d_model,
+            d_state=d_state,
+            d_conv=d_conv,
+            expand=expand,
+            headdim=64
+        )
+
+    def forward(self, x):
+        return x + self.mamba(self.norm(x))
+
+
+class Mamba2Classifier(Module):
     def __init__(
         self,
         num_classes: int,
-        vocab_size: int,
+        vocab_size: int = 64,
+        d_model: int = 256,
+        n_layers: int = 6,
+        d_state: int = 16,
+        d_conv: int = 4,
+        expand: int = 2,
+        dropout: float = 0.05,
+    ):
+        super(Mamba2Classifier, self).__init__()
+        self.embedding = Embedding(vocab_size + 1, d_model)
+        self.layers = ModuleList([
+            Mamba2Block(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
+            for _ in range(n_layers)
+        ])
+        self.norm = LayerNorm(d_model)
+        self.dropout = Dropout(dropout) if dropout > 0 else Identity()
+        self.classifier = Linear(d_model, num_classes)
+        self.mlm_head = Linear(d_model, vocab_size + 1)
+
+    def forward(self, x) -> Tensor:
+        h = self.embedding(x)
+        for block in self.layers:
+            h = block(h)   # each Mamba block returns [B, L, d_model]
+        h = self.norm(h)
+        pooled = h.mean(dim=1)  # [B, d_model]
+        pooled = self.dropout(pooled)
+        logits = self.classifier(pooled)  # [B, num_classes]
+        return logits
+
+
+class MambaClassifierLarge(Module):
+    def __init__(
+        self,
+        num_classes: int,
+        vocab_size: int = 64,
         d_model: int = 250,
         n_layers: int = 12,
         d_state: int = 16,
@@ -317,7 +325,7 @@ class MambaClassifier_12(Module):
         expand: int = 2,
         dropout: float = 0.05,
     ):
-        super(MambaClassifier_12, self).__init__()
+        super(MambaClassifierLarge, self).__init__()
         self.embedding = Embedding(vocab_size + 1, d_model)
         self.layers = ModuleList([
             MambaBlock(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
@@ -328,6 +336,176 @@ class MambaClassifier_12(Module):
         self.classifier = Linear(d_model, num_classes)
 
     def forward(self, x) -> Tensor:
+        h = self.embedding(x)
+        for block in self.layers:
+            h = block(h)   # each Mamba block returns [B, L, d_model]
+        h = self.norm(h)
+        pooled = h.mean(dim=1)  # [B, d_model]
+        pooled = self.dropout(pooled)
+        logits = self.classifier(pooled)  # [B, num_classes]
+        return logits
+
+
+class DownsamplingCNN(Module):
+    """Converts [B, 4, L] into [B, L_reduced, d_model]."""
+    def __init__(
+        self,
+        in_channels=4,
+        d_model=250,
+        n_layers=2,
+        kernel_size=9,
+        downsample_factor=4,
+    ):
+        super().__init__()
+        layers = []
+        c = in_channels
+        current_factor = 1
+        for i in range(n_layers):
+            stride = 2 if current_factor < downsample_factor else 1
+            current_factor *= stride
+            if type(kernel_size) is int:
+                layers += [
+                    Conv1d(c, d_model, kernel_size,
+                           stride=stride, padding=kernel_size // 2),
+                    ReLU(),
+                    BatchNorm1d(d_model)
+                ]
+            else:
+                layers += [
+                    Conv1d(c, d_model, kernel_size[i],
+                           stride=stride, padding=kernel_size[i] // 2),
+                    ReLU(),
+                    BatchNorm1d(d_model)
+                ]
+            c = d_model
+        self.net = Sequential(*layers)
+
+    def forward(self, x):
+        h = self.net(x)  # [B, d_model, L_reduced]
+        return h.transpose(1, 2)  # [B, L_reduced, d_model]
+
+
+class MambaClassifierCNN(Module):
+    def __init__(
+        self,
+        num_classes: int,
+        d_model: int = 250,
+        n_layers: int = 6,
+        d_state: int = 16,
+        d_conv: int = 4,
+        expand: int = 2,
+        dropout: float = 0.05,
+    ):
+        super(MambaClassifierCNN, self).__init__()
+        self.embedding = DownsamplingCNN(d_model=d_model, kernel_size=9)
+        self.layers = ModuleList([
+            MambaBlock(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
+            for _ in range(n_layers)
+        ])
+        self.norm = LayerNorm(d_model)
+        self.dropout = Dropout(dropout) if dropout > 0 else Identity()
+        self.classifier = Linear(d_model, num_classes)
+
+    def forward(self, x) -> Tensor:
+        batch_size, _ = x.size()
+        n1 = x // 16
+        n2 = (x // 4) % 4
+        n3 = x % 4
+        nucleotides = torch.stack([n1, n2, n3], dim=2).view(batch_size, -1)
+        one_hot = F.one_hot(nucleotides, num_classes=4).float()
+        x_onehot = one_hot.transpose(1, 2)  # [B, 4, 3 * L]
+        h = self.embedding(x_onehot)
+        for block in self.layers:
+            h = block(h)   # each Mamba block returns [B, L, d_model]
+        h = self.norm(h)
+        pooled = h.mean(dim=1)  # [B, d_model]
+        pooled = self.dropout(pooled)
+        logits = self.classifier(pooled)  # [B, num_classes]
+        return logits
+
+
+class AdjustableMambaBlock(Module):
+    def __init__(self, d_model, d_state, d_conv, expand, m, M):
+        super().__init__()
+        self.norm = LayerNorm(d_model)
+        self.mamba = Mamba(
+            d_model=d_model,
+            d_state=d_state,
+            d_conv=d_conv,
+            expand=expand,
+            dt_min = m,
+            dt_max=M,
+        )
+
+    def forward(self, x):
+        return x + self.mamba(self.norm(x))
+
+
+class DualTimescaleMamba(Module):
+    def __init__(self, d_model, d_state, fast_dt=(0.00001, 0.01), slow_dt=(0.001, 0.2)):
+        super().__init__()
+        self.in_proj = Linear(d_model, d_model * 2)
+        self.ssm_fast = AdjustableMambaBlock(
+            d_model=d_model,
+            d_state=d_state,
+            d_conv=4,
+            expand=2,
+            m=fast_dt[0],
+            M=fast_dt[1],
+        )
+        self.ssm_slow = AdjustableMambaBlock(
+            d_model=d_model,
+            d_state=d_state,
+            d_conv=4,
+            expand=2,
+            m=slow_dt[0],
+            M=slow_dt[1],
+        )
+        self.gate = Linear(d_model, d_model)
+        self.out_proj = Linear(d_model, d_model)
+
+    def forward(self, x):
+        u, v = self.in_proj(x).chunk(2, dim=-1)
+        y_fast = self.ssm_fast(u)
+        y_slow = self.ssm_slow(u)
+        g = torch.sigmoid(self.gate(v))
+        y = g * y_fast + (1 - g) * y_slow
+        return self.out_proj(y)
+
+
+class MambaClassifierDual(Module):
+    def __init__(
+        self,
+        num_classes: int,
+        vocab_size: int = 64,
+        d_model: int = 250,
+        n_layers: int = 6,
+        d_state: int = 16,
+        d_conv: int = 4,
+        expand: int = 2,
+        dropout: float = 0.05,
+        fast_dt=(0.00001, 0.01),
+        slow_dt=(0.001, 0.2),
+    ):
+        super().__init__()
+        self.embedding = Embedding(vocab_size + 1, d_model)
+        self.layers = ModuleList([
+            DualTimescaleMamba(d_model=d_model, d_state=d_state, fast_dt=fast_dt, slow_dt=slow_dt)
+        ])
+        for _ in range(n_layers - 2):
+            self.layers.append(
+                MambaBlock(
+                    d_model=d_model,
+                    d_state=d_state,
+                    d_conv=d_conv,
+                    expand=expand,
+                )
+            )
+        self.norm = LayerNorm(d_model)
+        self.dropout = Dropout(dropout) if dropout > 0 else Identity()
+        self.classifier = Linear(d_model, num_classes)
+
+    def forward(self, x: torch.LongTensor) -> torch.Tensor:
         h = self.embedding(x)
         for block in self.layers:
             h = block(h)   # each Mamba block returns [B, L, d_model]
@@ -405,58 +583,27 @@ class HierarchicalTaxonomicLoss(Module):
 def decode_trimer(encoded_sequence: list[int]) -> str:
     BITS_TO_BASE = {0: 'A', 1: 'C', 2: 'G', 3: 'T'}
     decoded_chars = []
+
     for val in encoded_sequence:
         if not (0 <= val <= 63):
             raise ValueError("Encoded trimer integers must be between 0 and 63.")
+
         # Extract the three nucleotides from right to left
         base3 = BITS_TO_BASE[val & 3]          # Get lowest 2 bits
         base2 = BITS_TO_BASE[(val >> 2) & 3]   # Shift 2 bits, get next 2 bits
         base1 = BITS_TO_BASE[(val >> 4) & 3]   # Shift 4 bits, get highest 2 bits
+
         decoded_chars.extend([base1, base2, base3])
+
     return "".join(decoded_chars)
-
-
-BASE_TO_BITS = {
-    'A': 0b00,
-    'C': 0b01,
-    'G': 0b10,
-    'T': 0b11,
-}
-def encode_sequence(sequence):
-    result = 0
-    for base in sequence:
-        result = (result << 2) | BASE_TO_BITS[base]
-    return result
-
-
-def encode_1mer(sequence: str) -> list[int]:
-    if any(base not in 'ACGT' for base in sequence):
-        raise ValueError("Input must be a 4-character string containing only A, C, G, T.")
-    return [BASE_TO_BITS[t] for t in sequence]
-
-
-def encode_2mer(sequence: str) -> list[int]:
-    if any(base not in 'ACGT' for base in sequence):
-        raise ValueError("Input must be a 4-character string containing only A, C, G, T.")
-    pairs = [sequence[i:i+2] for i in range(0, len(sequence), 2)]
-    return [encode_sequence(t) for t in pairs]
-
-
-def encode_tetramer(sequence: str) -> list[int]:
-    if any(base not in 'ACGT' for base in sequence):
-        raise ValueError("Input must be a 4-character string containing only A, C, G, T.")
-    tetramers = [sequence[i:i+4] for i in range(0, len(sequence), 4)]
-    return [encode_sequence(t) for t in tetramers]
 
 
 class LabelledDataset(Dataset):
     def __init__(self, directory: str, formatting: str = None, bpe_path: str = None):
         assert directory.endswith('/')
-        x_raw = np.load(directory + "x.npy")
-        y_arr = np.load(directory + "y.npy")
+        self.x = np.load(directory + "x.npy")
+        self.y = np.load(directory + "y.npy")
         self.formatting = formatting
-        self.y = tensor(y_arr, dtype=torch.long)
-
         if bpe_path:
             self.tokenizer = Tokenizer.from_file(bpe_path)
             self.pad_id = self.tokenizer.token_to_id("[PAD]")
@@ -468,33 +615,21 @@ class LabelledDataset(Dataset):
                 length=500
             )
 
-        processed_x = []
-        for x in x_raw:
-            if formatting in ("3mer", None):
-                processed_x.append(x)
-            elif formatting == "1mer":
-                decoded = decode_trimer(x)
-                encoded = encode_1mer(decoded)
-                processed_x.append(encoded)
-            elif formatting == "2mer":
-                decoded = decode_trimer(x)
-                encoded = encode_2mer(decoded)
-                processed_x.append(encoded)
-            elif formatting == "4mer":
-                decoded = decode_trimer(x)
-                encoded = encode_tetramer(decoded)
-                processed_x.append(encoded)
-            elif formatting == "bpe":
-                decoded = decode_trimer(x)
-                encoded = self.tokenizer.encode(decoded).ids
-                processed_x.append(encoded)
-        self.x = tensor(np.array(processed_x), dtype=torch.long)
-
     def __len__(self):
-        return len(self.y)
+        return len(self.x)
 
     def __getitem__(self, idx):
-        return self.x[idx], self.y[idx]
+        x = self.x[idx]
+        if self.formatting == "1mer":
+            pass
+        elif self.formatting == "bpe":
+            x = decode_trimer(x)
+            x = self.tokenizer.encode(x)
+            x = tensor(x.ids, dtype=torch.long)
+            y = self.y[idx]
+            return x, tensor(y)
+        y = self.y[idx]
+        return tensor(x), tensor(y)
 
 
 class PretrainingDataset(Dataset):
@@ -519,7 +654,7 @@ def load_training_data(train, test, validate, batch_size, formatting: str = None
     return train_data, test_data, validate_data
 
 
-def pretrain(classifier, pretrain_filepath, batch_size, device, pretraining_type="mlm"):
+def pretrain(classifier, pretrain_filepath, batch_size, device):
     optimizer = Adam(model.parameters(), lr=0.001)
     dataloader = DataLoader(PretrainingDataset(pretrain_filepath), batch_size=batch_size, shuffle=True)
     total_steps = len(dataloader)
@@ -538,27 +673,18 @@ def pretrain(classifier, pretrain_filepath, batch_size, device, pretraining_type
         x = x.to(device).long()
         targets = x.clone()
 
-        if pretraining_type == "causal":
-            # Causal masking: mask the last 15% of tokens
-            masked_indices = torch.zeros(x.shape, dtype=torch.bool, device=device)
-            seq_len = x.shape[1]
-            n_last = int(seq_len * 0.15)
-            masked_indices[:, -n_last:] = True
-            targets[~masked_indices] = -100
-            x[masked_indices] = mask_token_id
-        else:
-            # 1. Generate Mask Matrix (15%)
-            probability_matrix = full(x.shape, 0.15, device=device)
-            masked_indices = bernoulli(probability_matrix).bool()
-            targets[~masked_indices] = -100
+        # 1. Generate Mask Matrix (15%)
+        probability_matrix = full(x.shape, 0.15, device=device)
+        masked_indices = bernoulli(probability_matrix).bool()
+        targets[~masked_indices] = -100
 
-            # 2. Apply 80/10/10 Rule
-            indices_replaced = bernoulli(full(x.shape, 0.8, device=device)).bool() & masked_indices
-            x[indices_replaced] = mask_token_id
+        # 2. Apply 80/10/10 Rule
+        indices_replaced = bernoulli(full(x.shape, 0.8, device=device)).bool() & masked_indices
+        x[indices_replaced] = mask_token_id
 
-            indices_random = bernoulli(full(x.shape, 0.5, device=device)).bool() & masked_indices & ~indices_replaced
-            random_tokens = randint(0, vocab_size, x.shape, device=device)
-            x[indices_random] = random_tokens[indices_random]
+        indices_random = bernoulli(full(x.shape, 0.5, device=device)).bool() & masked_indices & ~indices_replaced
+        random_tokens = randint(0, vocab_size, x.shape, device=device)
+        x[indices_random] = random_tokens[indices_random]
 
         # 3. Forward Pass
         optimizer.zero_grad()
@@ -815,7 +941,7 @@ if __name__ == "__main__":
     parser.add_argument("--validate", type=str, help="Filepath to validation set")
     parser.add_argument("--n_classes", type=int, help="Number of classes")
     parser.add_argument("--batch_size", type=int, help="Batch size")
-    parser.add_argument("--n_epochs", type=int, help="Maximum number of epochs", default=0)
+    parser.add_argument("--n_epochs", type=int, help="Maximum number of epochs")
     parser.add_argument("--directory", type=str, help="output directory (weights and results)")
     parser.add_argument("--device", type=str, help="Either `cpu` or `cuda`.")
     parser.add_argument("--model", type=str, help="Name of the model to train and test.")
@@ -824,18 +950,6 @@ if __name__ == "__main__":
         type=str,
         default=None,
         help="Optional filepath to pretraining weights/data (default: None)"
-    )
-    parser.add_argument(
-        "--pretraining_type",
-        type=str,
-        default="mlm",
-        help="Optional pretraining masking type: `mlm` or `causal` (default: mlm)"
-    )
-    parser.add_argument(
-        "--n_pretraining",
-        type=int,
-        default=1,
-        help="Optional number of pretraining epochs (default: 1)"
     )
     parser.add_argument(
         "--start_weight_epoch",
@@ -864,29 +978,24 @@ if __name__ == "__main__":
     args = parser.parse_args()
     assert args.directory.endswith("/"), "`directory` must be a directory."
 
-    vocabulary_sizes = {
-        "1mer": 4,
-        "2mer": 16,
-        "3mer": 64,
-        "4mer": 256,
-        "bpe": None
-    }
-    v = vocabulary_sizes[args.format]
-
-    log("Creating the model.")
+    log(f"Creating the model.")
     n_classes = int(args.n_classes)
-    if args.model.lower() == "bertax-6":
-        model = BERTax(500, n_classes, vocab_size=v)
-    elif args.model.lower() == "bertax-12":
-        model = BERTax_12(500, n_classes, vocab_size=v)
-    elif args.model.lower() == "mamba-3":
-        model = MambaClassifier_3(n_classes, vocab_size=v)
-    elif args.model.lower() == "mamba-6":
-        model = MambaClassifier_6(n_classes, vocab_size=v)
-    elif args.model.lower() == "mamba-12":
-        model = MambaClassifier_12(n_classes, vocab_size=v)
+    if args.model.lower() == "bertax":
+        model = BERTax(500, n_classes)
+    elif args.model.lower() == "bertax_12":
+        model = BERTax_12(500, n_classes)
+    elif args.model.lower() == "mamba":
+        model = MambaClassifier(n_classes)
+    elif args.model.lower() == "mamba-cnn":
+        model = MambaClassifierCNN(n_classes)
+    elif args.model.lower() == "mamba-dual":
+        model = MambaClassifierDual(n_classes)
+    elif args.model.lower() == "mamba-large":
+        model = MambaClassifierLarge(n_classes)
+    elif args.model.lower() == "mamba-2":
+        model = Mamba2Classifier(n_classes)
     elif args.model.lower() == "mamba-attention":
-        model = MambaClassifierAttention(n_classes, vocab_size=v)
+        model = MambaClassifierAttention(n_classes)
     elif args.model.lower() == "mamba-bpe":
         model = MambaClassifierBPE(n_classes)
 
@@ -900,10 +1009,9 @@ if __name__ == "__main__":
 
     if args.pretraining:
         log("Pretrain the model.")
-        for n in range(args.n_pretraining):
-            pretrain(model, args.pretraining, args.batch_size, args.device, args.pretraining_type)
-            log("Saving the model at the end of pretraining.")
-            save(model.state_dict(), f"{args.directory}weights_pretraining_{n+1}.pt2")
+        pretrain(model, args.pretraining, args.batch_size, args.device)
+        log(f"Saving the model at the end of pretraining.")
+        save(model.state_dict(), f"{args.directory}weights_pretraining_epoch.pt2")
 
     try:
         n = int(args.n_epochs)
