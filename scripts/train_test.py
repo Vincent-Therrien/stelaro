@@ -1,4 +1,4 @@
-"""Train an test neural networks to classify
+"""Train an test neural networks to classify reads.
 
     Input:
       - `train_x`: filepath to a Numpy array file of dimension [N, L / 4]
